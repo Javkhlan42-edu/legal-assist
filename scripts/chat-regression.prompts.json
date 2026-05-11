@@ -1,0 +1,139 @@
+{
+  "apiUrl": "http://localhost:3001/v1/chat",
+  "globalMustNotContainAny": ["ТЕРРОРИЗМ", "ОЛИМП", "ӨРШӨӨЛ ҮЗҮҮЛЭХ"],
+  "minQuality": {
+    "retrievalAccuracy": 0.45,
+    "citationCorrectness": 0.5,
+    "answerFaithfulness": 0.6,
+    "responseLatency": 0.5,
+    "overall": 0.6
+  },
+  "tests": [
+    {
+      "id": "property-transfer-law",
+      "message": "эд хөрөнгө шилжүүлэхэд ямар хуулиар явагддаг вэ",
+      "mustContainAny": ["Иргэний хууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "sale-contract-explain",
+      "message": "худалдах худалдан авах гэрээг тайлбарла",
+      "mustContainAny": ["Иргэний хууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "real-estate-sale-checklist",
+      "message": "үл хөдлөх хөрөнгө худалдах гэрээний үед юу анхаарах вэ",
+      "mustContainAny": ["Иргэний хууль", "нотариат", "улсын бүртгэл"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "drunk-driving-consequence",
+      "message": "Согтуугаар тээврийн хэрэгсэл жолоодвол яах вэ",
+      "mustContainAny": ["Замын хөдөлгөөний", "Зөрчлийн тухай", "Эрүүгийн хууль"],
+      "mustNotContainAny": ["Терроризм", "Олимп"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "drunk-driving-liability",
+      "message": "согтуугаар жолоо баривал ямар хариуцлага хүлээх вэ",
+      "mustContainAny": ["Зөрчлийн тухай", "Эрүүгийн хууль", "Замын хөдөлгөөн"],
+      "mustNotContainAny": ["Терроризм", "Олимп"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "election-age-article",
+      "message": "сонгуулийг хэдэн настай хүн өгөх ёстой гэж хуулийн аль зүйл заалтаар заасан байдаг вэ",
+      "mustContainAny": ["18 нас", "Үндсэн хууль", "Сонгуулийн тухай"],
+      "mustNotContainAny": ["Эрүүгийн хууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "election-rights-overview",
+      "message": "сонгогчийн эрхийг ямар хууль зохицуулдаг вэ",
+      "mustContainAny": ["Сонгуулийн тухай", "сонгох эрх", "Үндсэн хууль"],
+      "mustNotContainAny": ["Эрүүгийн хууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "family-law-explain",
+      "message": "гэр бүлийн тухай хуулийг тайлбарла",
+      "mustContainAny": ["Гэр бүлийн тухай хууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "labor-termination",
+      "message": "хөдөлмөрийн гэрээг цуцлах журам",
+      "mustContainAny": ["Хөдөлмөрийн тухай хууль", "хөдөлмөр"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "social-insurance-nonpayment",
+      "message": "нийгмийн даатгалын шимтгэл төлөөгүй бол яах вэ",
+      "mustContainAny": ["Нийгмийн даатгал", "шимтгэл"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "tax-penalty",
+      "message": "татвар төлөөгүй бол ямар хариуцлага хүлээх вэ",
+      "mustContainAny": ["Татвар", "алданги", "торгууль"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "phone-theft",
+      "message": "гар утас хулгайд алдсан бол яах вэ",
+      "mustContainAny": ["IMEI", "цагдаа", "Find My"],
+      "maxLatencyMs": 15000,
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "cyber-fraud",
+      "message": "цахим луйварт өртсөн ямар арга хэмжээ авах вэ",
+      "mustContainAny": ["банк", "102", "нотлох баримт"],
+      "mustNotContainAny": ["Цахим гарын үсгийн тухай", "Ямар хэрэгт яллагдаж"],
+      "maxLatencyMs": 12000,
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "delayed-auto-insurance",
+      "message": "3 сарын өмнө машинтай мөргөлдөөд даатгалаас маань одоо хүртэл мөнгөө олгохгүй байна. камер байхгүй гээд нотолж чадахгүй гэж байна",
+      "mustContainAny": ["Даатгал", "камер", "Санхүүгийн зохицуулах хороо"],
+      "mustNotContainAny": ["Дураараа аашлах", "Хүн худалдаалах", "Эх орноосоо урвах"],
+      "maxLatencyMs": 15000,
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "public-noise",
+      "message": "Манай хажуу байрны айл хэт их дуу чимээ гаргаад амгалан тайван байдал алдагдуулаад байна",
+      "mustContainAny": ["102", "дуу чимээ", "амгалан тайван"],
+      "mustNotContainAny": ["Даатгалын тухай", "Даатгагч"],
+      "maxLatencyMs": 12000,
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "bank-loan-advice",
+      "message": "Банкнаас зээл авахдаа аль аль хууль дээр анхаарах вэ",
+      "mustContainAny": ["Иргэний хууль", "зээлийн гэрээ", "Банк"],
+      "mustNotContainAny": ["Хадгаламжийн даатгал"],
+      "maxLatencyMs": 20000,
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "domestic-violence",
+      "message": "гэр бүлийн хүчирхийлэлд ямар хууль үйлчлэх вэ",
+      "mustContainAny": ["Гэр бүлийн хүчирхийлэл", "Эрүүгийн хууль", "хүчирхийлэл"],
+      "mustNotBeNoInfo": true
+    },
+    {
+      "id": "generic-liability-no-context",
+      "message": "ямар хуулийн хариуцлага хүлээх вэ",
+      "expectNoInfo": true
+    },
+    {
+      "id": "insurance-basic",
+      "message": "даатгал төлөөгүй бол яах вэ",
+      "mustContainAny": ["даатгал", "шимтгэл", "хариуцлага"],
+      "mustNotBeNoInfo": true
+    }
+  ]
+}

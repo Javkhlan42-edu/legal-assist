@@ -1,0 +1,53 @@
+{
+  "name": "legal-chatbot-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mongolian Legal RAG Chatbot — Bachelor Thesis",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "pnpm --filter @legal-chatbot/api test",
+    "test:all": "turbo run test",
+    "db:summary": "node scripts/db-inspect.mjs summary",
+    "db:documents": "node scripts/db-inspect.mjs documents",
+    "db:search": "node scripts/db-inspect.mjs search",
+    "db:law": "node scripts/db-inspect.mjs law",
+    "db:export": "node scripts/db-inspect.mjs export",
+    "db:pgadmin": "docker compose -f docker/docker-compose.yml up -d postgres pgadmin",
+    "ingest:legalinfo": "pnpm --filter @legal-chatbot/worker ingest:legalinfo",
+    "ingest:legalinfo:938": "pnpm --filter @legal-chatbot/worker ingest -- --source legalinfo --limit 938 --fresh",
+    "ingest:legalinfo:mn-law": "node scripts/ingest-legalinfo-mn-law.mjs",
+    "rebuild:legalinfo:mn-law": "node scripts/rebuild-legalinfo-mn-law.mjs",
+    "ingest:shuukh": "pnpm --filter @legal-chatbot/worker ingest:shuukh",
+    "ingest:shuukh:recent": "pnpm --filter @legal-chatbot/worker ingest:shuukh -- --fresh --limit 1500",
+    "seed:priority:refresh": "pnpm --filter @legal-chatbot/worker seed:priority:refresh",
+    "ingest:seed-priority": "pnpm --filter @legal-chatbot/worker ingest:seed-priority",
+    "test:chat-regression": "node scripts/chat-regression.mjs",
+    "test:chat-quality": "node scripts/chat-regression.mjs",
+    "verify:vector": "pnpm --filter @legal-chatbot/worker verify:vector",
+    "reembed:db": "pnpm --filter @legal-chatbot/worker reembed:db",
+    "reembed:legalinfo": "pnpm --filter @legal-chatbot/worker reembed:db -- --source legalinfo",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "turbo run clean && rimraf node_modules"
+  },
+  "devDependencies": {
+    "@types/minimatch": "^6.0.0",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^9.0.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.2.0",
+    "rimraf": "^5.0.5",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.1.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  ssh-deploy:
+    name: Deploy with Docker Compose
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SSH_DEPLOY == 'true'
+
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Pull and restart services
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          test -n "$DEPLOY_PATH"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -e
+            if [ ! -d '$DEPLOY_PATH/.git' ]; then
+              mkdir -p '$DEPLOY_PATH'
+              git clone 'https://github.com/$REPOSITORY.git' '$DEPLOY_PATH'
+            fi
+            cd '$DEPLOY_PATH'
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+            docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+          "

@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data / cache / local exports
+data/
+db-documents-export.*
+temp-*.json
+test-*.json
+package-lock.json
+
+# Test
+coverage/
+
+# Docker
+docker/**/data/

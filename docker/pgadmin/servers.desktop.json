@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Legal Chatbot PostgreSQL (Local Docker)",
+      "Group": "Legal Chatbot",
+      "Host": "127.0.0.1",
+      "Port": 5433,
+      "MaintenanceDB": "legal_chatbot",
+      "Username": "postgres",
+      "SSLMode": "prefer"
+    }
+  }
+}

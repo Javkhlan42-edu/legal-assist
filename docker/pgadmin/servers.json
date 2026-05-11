@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Legal Chatbot PostgreSQL",
+      "Group": "Legal Chatbot",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "legal_chatbot",
+      "Username": "postgres",
+      "PassFile": "/pgpass",
+      "SSLMode": "prefer"
+    }
+  }
+}
