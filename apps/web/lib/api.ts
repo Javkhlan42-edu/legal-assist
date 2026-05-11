@@ -12,7 +12,9 @@ import type {
 } from '@legal-chatbot/shared';
 import { getStoredAccessToken } from './auth-storage';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3001');
 
 export class ApiError extends Error {
   constructor(

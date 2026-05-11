@@ -7,11 +7,13 @@ on:
 
 jobs:
   ssh-deploy:
-    name: Deploy with Docker Compose
+    name: Deploy to AWS EC2 with Docker Compose
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || vars.ENABLE_SSH_DEPLOY == 'true'
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure SSH
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -27,24 +29,49 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
+      - name: Upload production env
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+        run: |
+          test -n "$DEPLOY_PATH"
+          if [ -n "$PRODUCTION_ENV" ]; then
+            ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+            printf '%s\n' "$PRODUCTION_ENV" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env'"
+          else
+            echo "::warning::PRODUCTION_ENV secret is empty. The remote server must already have $DEPLOY_PATH/.env."
+          fi
+
       - name: Pull and restart services
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_URL: https://github.com/${{ github.repository }}.git
         run: |
           test -n "$DEPLOY_PATH"
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
             set -e
             if [ ! -d '$DEPLOY_PATH/.git' ]; then
               mkdir -p '$DEPLOY_PATH'
-              git clone 'https://github.com/$REPOSITORY.git' '$DEPLOY_PATH'
+              git clone '$REPOSITORY_URL' '$DEPLOY_PATH'
             fi
             cd '$DEPLOY_PATH'
+            git remote set-url origin '$REPOSITORY_URL'
             git fetch origin main
             git checkout main
             git pull --ff-only origin main
-            docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+            test -f .env
+            docker compose -f docker/docker-compose.aws.yml up -d --build --remove-orphans
+            docker compose -f docker/docker-compose.aws.yml ps
           "
+
+      - name: Health check
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          curl --fail --retry 12 --retry-delay 5 "http://$DEPLOY_HOST/health"

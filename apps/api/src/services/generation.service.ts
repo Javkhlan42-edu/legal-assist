@@ -176,6 +176,9 @@ export async function generate(
   const publicNoiseScenario = isPublicNoiseComplaintQuery(primaryQuery);
   const cyberFraudScenario = isCyberFraudQuery(primaryQuery);
   const phoneTheftScenario = isPhoneTheftQuery(primaryQuery);
+  const consumerRefundScenario = isConsumerRefundQuery(primaryQuery);
+  const laborDismissalOrWageScenario = isLaborDismissalOrWageQuery(primaryQuery);
+  const trafficInsuranceClaimScenario = isTrafficInsuranceClaimQuery(primaryQuery);
   const bankLoanOverdueScenario =
     isBankLoanOverdueQuery(primaryQuery) || isBankLoanOverdueQuery(query);
 
@@ -187,11 +190,19 @@ export async function generate(
     return buildBankLoanOverdueFallback(primaryQuery, []);
   }
 
+  if (mode === 'qa' && consumerRefundScenario && contextChunks.length === 0) {
+    return buildConsumerRefundFallback(primaryQuery, []);
+  }
+
+  if (mode === 'qa' && laborDismissalOrWageScenario && contextChunks.length === 0) {
+    return buildLaborDismissalWageFallback(primaryQuery, []);
+  }
+
   if (mode === 'qa' && cyberFraudScenario && contextChunks.length === 0) {
     return buildCyberFraudFallback(primaryQuery, []);
   }
 
-  if (mode === 'qa' && isTrafficInsuranceClaimQuery(primaryQuery) && contextChunks.length === 0) {
+  if (mode === 'qa' && trafficInsuranceClaimScenario && contextChunks.length === 0) {
     return buildTrafficInsuranceClaimFallback(primaryQuery, []);
   }
 
@@ -243,11 +254,16 @@ export async function generate(
   );
   const trafficIncidentScenario =
     effectiveIntent === 'traffic' && isTrafficIncidentScenarioQuery(primaryQuery);
-  const trafficInsuranceClaimScenario = isTrafficInsuranceClaimQuery(primaryQuery);
 
   if (contextStrength === 'none') {
     if (mode === 'qa' && bankLoanOverdueScenario) {
       return buildBankLoanOverdueFallback(primaryQuery, chunksForAnswer);
+    }
+    if (mode === 'qa' && consumerRefundScenario) {
+      return buildConsumerRefundFallback(primaryQuery, chunksForAnswer);
+    }
+    if (mode === 'qa' && laborDismissalOrWageScenario) {
+      return buildLaborDismissalWageFallback(primaryQuery, chunksForAnswer);
     }
     if (mode === 'qa' && publicNoiseScenario) {
       return buildPublicNoiseFallback(chunksForAnswer);
@@ -270,6 +286,14 @@ export async function generate(
 
   if (mode === 'qa' && bankLoanOverdueScenario && contextStrength !== 'strong') {
     return buildBankLoanOverdueFallback(primaryQuery, chunksForAnswer);
+  }
+
+  if (mode === 'qa' && consumerRefundScenario) {
+    return buildConsumerRefundFallback(primaryQuery, chunksForAnswer);
+  }
+
+  if (mode === 'qa' && laborDismissalOrWageScenario) {
+    return buildLaborDismissalWageFallback(primaryQuery, chunksForAnswer);
   }
 
   if (mode === 'qa' && cyberFraudScenario) {
@@ -512,6 +536,7 @@ export async function generate(
     };
   }
 
+  finalAnswer = cleanupAnswerStructure(finalAnswer);
   finalAnswer = ensureLegalLinksInAnswer(finalAnswer, primaryQuery, chunksForAnswer);
 
   return {
@@ -568,6 +593,37 @@ function ensureLegalLinksInAnswer(
     '**Эх сурвалжийн холбоос**',
     ...citations.map((citation, index) => `${index + 1}. ${citation}`),
   ].join('\n');
+}
+
+function cleanupAnswerStructure(answer: string): string {
+  const lines = answer.split(/\r?\n/);
+  const cleaned: string[] = [];
+  const orphanSectionLabels =
+    /^(?:Зөвлөгөө|Яг одоо хийх алхам|Хуулийн үндэслэл|Хуулийн тайлбар|Анхаарах эрсдэл|Практик зөвлөгөө)$/i;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i]?.trim() ?? '';
+    const next = lines[i + 1]?.trim() ?? '';
+
+    if (/^\d+$/.test(current) && orphanSectionLabels.test(next.replace(/\*\*/g, ''))) {
+      continue;
+    }
+
+    if (
+      cleaned.length > 0 &&
+      current.replace(/\*\*/g, '') === 'Практик зөвлөгөө' &&
+      cleaned[cleaned.length - 1].replace(/\*\*/g, '') === 'Практик зөвлөгөө'
+    ) {
+      continue;
+    }
+
+    cleaned.push(lines[i] ?? '');
+  }
+
+  return cleaned
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function buildQaOpeningAdvice(intent: QueryIntent, query: string): string {
@@ -1019,6 +1075,128 @@ function buildLaborDocumentChecklistFallback(): GenerationResult {
   };
 }
 
+function buildConsumerRefundFallback(query: string, chunks: ChromaQueryResult[]): GenerationResult {
+  const refs = collectQaReferences(query, chunks)
+    .filter((ref) =>
+      /хэрэглэгч|иргэний\s+хууль|худалдах|худалдан|бараа|бүтээгдэхүүн|доголдол|чанар|буцаалт|нөхөн\s*төлбөр/i.test(
+        normalizeForMatch(`${ref.summary} ${ref.citation}`),
+      ),
+    )
+    .slice(0, 4);
+  const referenceLines =
+    refs.length > 0
+      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      : [
+          '1. Хэрэглэгчийн эрхийг хамгаалах тухай хууль болон Иргэний хуулийн худалдах-худалдан авах гэрээний зохицуулалтаар доголдолтой бараанд засварлуулах, солих, үнийг бууруулах, буцаах, хохирол шаардах боломжийг шалгана.',
+          '2. Онлайн худалдан авалтын үед захиалгын баримт, төлбөрийн баримт, хүргэлтийн мэдээлэл, дэлгүүртэй харилцсан чат, бүтээгдэхүүний зураг нь шаардлага гаргах үндсэн нотолгоо болно.',
+        ].join('\n\n');
+
+  const answer = [
+    'Онлайн дэлгүүрээс авсан бүтээгдэхүүн доголдолтой ирсэн бол буцаалт, солих, засварлуулах, үнийг бууруулах эсвэл төлсөн мөнгөө буцаан авах талаар маргах боломжтой. Гол нь доголдлыг авсан даруйдаа баримтжуулж, худалдагчид бичгээр шаардлага өгөөд хариуг нь хадгалах хэрэгтэй.',
+    '',
+    '**Яг одоо хийх алхам**',
+    '1. Захиалгын дугаар, төлбөрийн баримт, хүргэлтийн баримт, бүтээгдэхүүний сав баглаа, доголдлын зураг/видеог нэг багц болго.',
+    '2. Онлайн дэлгүүрт “доголдолтой бүтээгдэхүүн ирсэн тул буцаалт/солилт/мөнгөн төлбөр буцаахыг шаардаж байна” гэж бичгээр мэдэгдээд хугацаа зааж хариу ав.',
+    '3. Худалдагч буцаалт хийхгүй бол хэрэглэгчийн гомдол хүлээн авах эрх бүхий байгууллага, хэрэглэгчийн эрх хамгаалах байгууллага эсвэл шүүхэд хандахад ашиглах баримтаа хадгал.',
+    '4. Бүтээгдэхүүнийг өөрөө задлан засварлах, гэмтлийг нэмэгдүүлэх үйлдэл хийхээс зайлсхий; маргаанд “хэрэглэгч өөрөө гэмтээсэн” гэж маргах эрсдэлтэй.',
+    '',
+    '**Хуулийн үндэслэл**',
+    referenceLines,
+    '',
+    '**Анхаарах эрсдэл**',
+    'Худалдагчтай зөвхөн утсаар ярьсан бол дараа нь нотлоход сул байдаг. Иймээс чат, имэйл, албан шаардлага, төлбөрийн баримт, хүргэлтийн огноо, доголдлын зураг зэрэг бичгээр үлдэх нотолгоог бүрдүүл. Буцаалтын хугацаа, баталгааны нөхцөл, “хүлээн авснаас хойш хэд хоногт мэдэгдэх” гэсэн дэлгүүрийн нөхцөлийг давхар шалга.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Дэлгүүрт өгөх шаардлагадаа захиалгын дугаар, авсан огноо, доголдлын тодорхой тайлбар, шаардаж буй шийдлээ нэг мөрөөр бич.',
+    '- “Солих уу, мөнгө буцаах уу, засварлуулах уу” гэдгээ тодорхой сонгож бичвэл маргаан сунжрах нь багасна.',
+    '- Хэрэв дэлгүүр таныг блоклох, хариу өгөхгүй байх, баримтаа устгах шинжтэй байвал screenshot-оо шууд хадгал.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: refs.length > 0 ? 0.76 : 0.66,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: refs.length > 0 ? 'context' : 'fallback-general',
+    suggestedQuestions: [
+      'Доголдолтой барааг буцаах шаардлагын загвар бичиж өгөх үү?',
+      'Онлайн дэлгүүр буцаалт хийхгүй бол хаана гомдол гаргах вэ?',
+      'Доголдлыг нотлох ямар баримт хамгийн чухал вэ?',
+    ],
+  };
+}
+
+function buildLaborDismissalWageFallback(
+  query: string,
+  chunks: ChromaQueryResult[],
+): GenerationResult {
+  const dismissalFocus = /ажлаас|халагд|халуул|халсан|үндэслэлгүй/i.test(
+    normalizeForMatch(query),
+  );
+  const refs = collectQaReferences(query, chunks)
+    .filter((ref) =>
+      /хөдөлмөр|ажлаас|халах|халагд|дуусгавар|цалин|олговор|ажил\s+олгогч|маргаан/i.test(
+        normalizeForMatch(`${ref.summary} ${ref.citation}`),
+      ) &&
+      !/ажил\s+үүрэг\s+гүйцэтгэхийг\s+түдгэлзүүлэх/i.test(normalizeForMatch(ref.summary)),
+    )
+    .slice(0, 4);
+  const referenceLines =
+    refs.length > 0
+      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      : [
+          '1. Хөдөлмөрийн тухай хуульд хөдөлмөр эрхлэлтийн харилцаа дуусгавар болгох үндэслэл, ажлаас халсан шийдвэр гаргах журам, цалин хөлс, олговор, хөдөлмөрийн маргаан шийдвэрлэх журмыг шалгана.',
+          '2. Цалин төлүүлэх шаардлага нь ажилласан хугацаа, цалингийн тооцоо, тушаал, гэрээ, цагийн бүртгэлээр нотлогдох ёстой.',
+        ].join('\n\n');
+  const opening = dismissalFocus
+    ? 'Үндэслэлгүй ажлаас халсан гэж үзэж байгаа бол ажлаас халсан шийдвэрийг хүчингүй болгуулах, ажилд эгүүлэн тогтоолгох, ажилгүй байсан хугацааны цалин болон дутуу цалинг нэхэмжлэхээр маргах боломжтой. Таны хамгийн түрүүнд хийх зүйл бол халсан тушаал, хөдөлмөрийн гэрээ, цалингийн тооцоо, ажилласан цагийн нотолгоогоо бүрдүүлэх юм.'
+    : 'Цалин хөлсөө бүрэн аваагүй, ажил олгогч төлөхөөс татгалзаж байгаа бол ажилласан хугацаа, цалингийн хэмжээ, цагийн бүртгэл, тушаал, гэрээ, банкны хуулгаар нотолж цалин төлүүлэхээр маргах боломжтой. Эхлээд ажил олгогчоос тооцоог бичгээр гаргуулж, дутуу төлбөрөө тодорхой дүнгээр шаард.';
+  const actionSteps = dismissalFocus
+    ? [
+        '1. Ажлаас халсан тушаал, мэдэгдэл, хөдөлмөрийн гэрээ, ажлын байрны тодорхойлолт, дотоод журам, цалингийн баримтаа ав.',
+        '2. Ажил олгогчоос халсан үндэслэл, тооцоо дуусгасан байдал, дутуу цалин байгаа эсэхийг бичгээр тодруул.',
+        '3. Халагдсан огноо, ажилласан хугацаа, цалин хөлс, нийгмийн даатгалын бичилт, имэйл/чат/гэрчийн мэдээллээ цаг хугацааны дарааллаар эмхэл.',
+        '4. Дотоод гомдол, хөдөлмөрийн маргаан шийдвэрлэх шат эсвэл шүүхэд хандах хугацаагаа алдахгүйгээр нэхэмжлэл/гомдлоо бэлд.',
+      ]
+    : [
+        '1. Хөдөлмөрийн гэрээ, цалингийн хэмжээ, цагийн бүртгэл, ажилласан өдрийн нотолгоо, банкны хуулгаа нэг багц болго.',
+        '2. Ажил олгогчоос цалингийн тооцоо, дутуу төлбөрийн шалтгаан, төлөх хугацааг бичгээр гаргуул.',
+        '3. Дутуу цалин, илүү цаг, амралтын мөнгө, нэмэгдэл хөлсөө тус тусад нь тооцож шаардлагаа бичгээр өг.',
+        '4. Хариу өгөхгүй эсвэл төлөхгүй бол хөдөлмөрийн маргаан шийдвэрлэх шат, шаардлагатай бол шүүхэд ханд.',
+      ];
+
+  const answer = [
+    opening,
+    '',
+    '**Яг одоо хийх алхам**',
+    ...actionSteps,
+    '',
+    '**Хуулийн үндэслэл**',
+    referenceLines,
+    '',
+    '**Анхаарах эрсдэл**',
+    'Хөдөлмөрийн маргаанд хугацаа маш чухал. Халсан тушаалын огноо, тушаал хүлээн авсан өдөр, цалин тооцсон эсэх, ажил олгогчийн бичгээр өгсөн үндэслэл зэрэг нь маргааны үр дүнд шууд нөлөөлнө. Аман тайлбар хангалтгүй тул бүх шаардлага, хариуг бичгээр авч хадгал.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- “Ажлаас халсан тушаалын хуулбар, цалингийн эцсийн тооцоо, нийгмийн даатгалын бичилтээ өгнө үү” гэж бичгээр шаард.',
+    '- Цалин нэхэмжлэхдээ үндсэн цалин, нэмэгдэл, илүү цаг, амралтын мөнгө, ажилгүй байсан хугацааны олговор зэргийг тусад нь тооц.',
+    '- Ажил олгогчтой маргалдахдаа мессеж, имэйл, тушаалын огноо, гарын үсэгтэй баримтаа устгахгүй хадгал.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: refs.length > 0 ? 0.76 : 0.66,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: refs.length > 0 ? 'context' : 'fallback-general',
+    suggestedQuestions: [
+      'Ажлаас халсан тушаал хууль ёсны эсэхийг яаж шалгах вэ?',
+      'Ажилгүй байсан хугацааны цалинг яаж тооцож нэхэмжлэх вэ?',
+      'Хөдөлмөрийн маргаанд ямар баримт хамгийн чухал вэ?',
+    ],
+  };
+}
+
 function collectQaReferences(query: string, chunks: ChromaQueryResult[]): QaReference[] {
   const seen = new Set<string>();
   const refs: QaReference[] = [];
@@ -1148,8 +1326,32 @@ function isBankLoanOverdueQuery(query: string): boolean {
 }
 
 function isCyberFraudQuery(query: string): boolean {
+  if (isConsumerRefundQuery(query)) {
+    return false;
+  }
+
   const normalized = normalizeForMatch(query);
   return /(?=.*(?:цахим|онлайн|интернет|фишинг|facebook|фэйсбүүк|чат|линк|otp|нэг\s+удаагийн\s+код|карт|данс|гүйлгээ|шилжүүлэг|апп|мөнгө))(?=.*(?:луйвар|залил|хууран\s*мэхл|мэхэл|алда|шилжүүлсэн|авчих))/i.test(
+    normalized,
+  );
+}
+
+function isConsumerRefundQuery(query: string): boolean {
+  const normalized = normalizeForMatch(query);
+  const hasConsumerTransaction =
+    /онлайн|интернет|дэлгүүр|худалдан|захиал|бүтээгдэхүүн|бараа|үйлчилгээ|хэрэглэгч/i.test(
+      normalized,
+    );
+  const hasRefundOrDefect =
+    /доголд|эвдэр|чанаргүй|таарахгүй|буцаалт|буцаах|мөнгө\s+буца|төлүүлэх|солих|баталгаа/i.test(
+      normalized,
+    );
+  return hasConsumerTransaction && hasRefundOrDefect;
+}
+
+function isLaborDismissalOrWageQuery(query: string): boolean {
+  const normalized = normalizeForMatch(query);
+  return /ажлаас|халагд|халуул|халсан|ажил\s+олгогч|хөдөлмөр|цалин|олговор|үндэслэлгүй/i.test(
     normalized,
   );
 }

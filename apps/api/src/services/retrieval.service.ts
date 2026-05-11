@@ -112,7 +112,7 @@ const TRAFFIC_CASE_QUERY_PATTERN =
 const BROAD_OVERVIEW_QUERY_PATTERN =
   /(эрх|үүрэг|дэлгэрэнгүй|мэдээлэл|тайлбар|танилцуул|ерөнхий|юу\s+зохицуулдаг|ямар\s+эрх|ямар\s+үүрэг)/i;
 const CYBER_FRAUD_QUERY_PATTERN =
-  /(?=.*(?:цахим|онлайн|интернет|фишинг|facebook|фэйсбүүк|чат|линк|otp|нэг\s+удаагийн\s+код|карт|данс|гүйлгээ|шилжүүлэг|апп|мөнгө))(?=.*(?:луйвар|залил|хууран\s*мэхл|мэхэл|алда|шилжүүлсэн|авчих))/i;
+  /(?=.*(?:цахим|онлайн|интернет|фишинг|facebook|фэйсбүүк|чат|линк|otp|нэг\s+удаагийн\s+код|карт|данс|гүйлгээ|шилжүүлэг|апп|мөнгө))(?=.*(?:луйвар|залил|хууран\s*мэхл|мэхэл|алд(?:сан|чих|лаа|уул|ав)|шилжүүлсэн|авчих))/i;
 const CYBER_FRAUD_SIGNAL_PATTERNS: RegExp[] = [
   /залилан|залилах|хууран\s*мэхл|луйвар/i,
   /цахим|онлайн|интернет|фишинг|чат|линк|otp|нэг\s+удаагийн\s+код/i,
@@ -577,11 +577,15 @@ export async function search(
   fusedResults = await augmentWithSignalKeywordFallback(baseQuery, intent, fusedResults);
   fusedResults = await augmentWithCyberFraudFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithInsuranceClaimFallback(baseQuery, fusedResults);
+  fusedResults = await augmentWithConsumerRefundFallback(baseQuery, fusedResults);
+  fusedResults = await augmentWithLaborDismissalFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithPublicNoiseFallback(baseQuery, fusedResults);
   fusedResults = applyTopicSignalFiltering(baseQuery, fusedResults);
   fusedResults = applyDomainFiltering(intent, fusedResults);
   fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
   fusedResults = applyInsuranceClaimFiltering(baseQuery, fusedResults);
+  fusedResults = applyConsumerRefundFiltering(baseQuery, fusedResults);
+  fusedResults = applyLaborDismissalFiltering(baseQuery, fusedResults);
   fusedResults = applyPublicNoiseFiltering(baseQuery, fusedResults);
   fusedResults = applyTrafficIncidentFiltering(baseQuery, fusedResults);
   if (shouldPreferCanonicalOverview) {
@@ -592,11 +596,15 @@ export async function search(
   fusedResults = await augmentWithFocusedClauses(baseQuery, fusedResults);
   fusedResults = await augmentWithCyberFraudFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithInsuranceClaimFallback(baseQuery, fusedResults);
+  fusedResults = await augmentWithConsumerRefundFallback(baseQuery, fusedResults);
+  fusedResults = await augmentWithLaborDismissalFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithPublicNoiseFallback(baseQuery, fusedResults);
   fusedResults = applyTopicSignalFiltering(baseQuery, fusedResults);
   fusedResults = applyDomainFiltering(intent, fusedResults);
   fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
   fusedResults = applyInsuranceClaimFiltering(baseQuery, fusedResults);
+  fusedResults = applyConsumerRefundFiltering(baseQuery, fusedResults);
+  fusedResults = applyLaborDismissalFiltering(baseQuery, fusedResults);
   fusedResults = applyPublicNoiseFiltering(baseQuery, fusedResults);
   fusedResults = applyTrafficIncidentFiltering(baseQuery, fusedResults);
   fusedResults = applyPreferredLawBoost(baseQuery, intent, mode, preferredLawIds, fusedResults);
@@ -1039,6 +1047,33 @@ function applyTopicSignalFiltering(
 }
 
 function getTopicSignalPatterns(query: string): RegExp[] {
+  if (isConsumerRefundQuery(query)) {
+    return [
+      /хэрэглэгч|хэрэглэгчийн\s+эрх/i,
+      /бараа|бүтээгдэхүүн|үйлчилгээ|доголдол|чанаргүй|баталгаа/i,
+      /буцаалт|буцаах|солих|мөнгө\s+буца|нөхөн\s*төлбөр/i,
+      /иргэний\s+хууль|худалдах|худалдан\s+авах\s+гэрээ/i,
+    ];
+  }
+
+  if (isLaborDismissalOrWageQuery(query)) {
+    return [
+      /хөдөлмөрийн\s+тухай|хөдөлмөр/i,
+      /ажлаас|халах|халагд|цуцлах|дуусгавар|ажил\s+хүлээлцэх/i,
+      /цалин|олговор|ажилгүй\s+байсан\s+хугацаа|ажил\s+олгогч/i,
+      /маргаан|нэхэмжлэл|шүүх/i,
+    ];
+  }
+
+  if (isTrafficInsuranceClaimQuery(query)) {
+    return [
+      /даатгал|даатгагч|даатгуулагч/i,
+      /нөхөн\s*төлбөр|даатгалын\s+тохиолдол|татгалз|хохирол/i,
+      /иргэний\s+хууль|даатгалын\s+тухай|жолоочийн\s+даатгал/i,
+      /нотлох\s+баримт|нэхэмжлэл|шүүх|санхүүгийн\s+зохицуулах/i,
+    ];
+  }
+
   if (
     /согтуур|согтуу|жолоод|жолооны\s*эрх|тээврийн\s*хэрэгсэл|замын\s*хөдөлгөөн|осол|мөргө|мөргөлд|шүрг|шүргэ|зугт|ослын\s*газар|эсрэг\s*урсгал|зогсоол|паркинг|авто\s*даатгал|каско/i.test(
       query,
@@ -1240,6 +1275,116 @@ async function augmentWithInsuranceClaimFallback(
   for (const row of keywordResults) {
     const mapped = keywordResultToQueryResult(row, 0.56);
     if (!isInsuranceClaimRelevantResult(query, mapped)) {
+      continue;
+    }
+
+    const boostedScore = Math.min(1, mapped.score + 0.12);
+    const existing = merged.get(mapped.id);
+    if (!existing || boostedScore > existing.score) {
+      merged.set(mapped.id, {
+        ...mapped,
+        score: boostedScore,
+      });
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.score - a.score);
+}
+
+async function augmentWithConsumerRefundFallback(
+  query: string,
+  results: ChromaQueryResult[],
+): Promise<ChromaQueryResult[]> {
+  if (!isConsumerRefundQuery(query)) {
+    return results;
+  }
+
+  const relevantCount = results
+    .slice(0, 12)
+    .filter((result) => isConsumerRefundRelevantResult(result)).length;
+
+  if (relevantCount >= 3) {
+    return results;
+  }
+
+  const fallbackQuery =
+    'хэрэглэгчийн эрхийг хамгаалах тухай хууль доголдолтой бараа бүтээгдэхүүн буцаалт иргэний хууль худалдах худалдан авах гэрээ';
+  let keywordResults = await keywordSearchService.search(fallbackQuery, 28, {
+    source: 'legalinfo',
+  });
+  if (keywordResults.length === 0) {
+    keywordResults = await keywordSearchService.searchMongolian(fallbackQuery, 28, {
+      source: 'legalinfo',
+    });
+  }
+
+  if (keywordResults.length === 0) {
+    return results;
+  }
+
+  const merged = new Map<string, ChromaQueryResult>();
+  for (const item of results) {
+    merged.set(item.id, item);
+  }
+
+  for (const row of keywordResults) {
+    const mapped = keywordResultToQueryResult(row, 0.56);
+    if (!isConsumerRefundRelevantResult(mapped)) {
+      continue;
+    }
+
+    const boostedScore = Math.min(1, mapped.score + 0.12);
+    const existing = merged.get(mapped.id);
+    if (!existing || boostedScore > existing.score) {
+      merged.set(mapped.id, {
+        ...mapped,
+        score: boostedScore,
+      });
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.score - a.score);
+}
+
+async function augmentWithLaborDismissalFallback(
+  query: string,
+  results: ChromaQueryResult[],
+): Promise<ChromaQueryResult[]> {
+  if (!isLaborDismissalOrWageQuery(query)) {
+    return results;
+  }
+
+  const relevantCount = results
+    .slice(0, 12)
+    .filter((result) => isLaborDismissalRelevantResult(result)).length;
+
+  if (relevantCount >= 3) {
+    return results;
+  }
+
+  const fallbackQuery =
+    'хөдөлмөрийн тухай хууль ажлаас халах хөдөлмөр эрхлэлтийн харилцаа дуусгавар цалин хөлс ажилгүй байсан хугацаа маргаан';
+  let keywordResults = await keywordSearchService.search(fallbackQuery, 28, {
+    source: 'legalinfo',
+  });
+  if (keywordResults.length === 0) {
+    keywordResults = await keywordSearchService.searchMongolian(fallbackQuery, 28, {
+      source: 'legalinfo',
+    });
+  }
+
+  if (keywordResults.length === 0) {
+    return results;
+  }
+
+  const merged = new Map<string, ChromaQueryResult>();
+  for (const item of results) {
+    merged.set(item.id, item);
+  }
+
+  for (const row of keywordResults) {
+    const mapped = keywordResultToQueryResult(row, 0.56);
+    if (!isLaborDismissalRelevantResult(mapped)) {
       continue;
     }
 
@@ -1632,6 +1777,9 @@ const INSURANCE_CLAIM_TEXT_PATTERNS: RegExp[] = [
 ];
 
 const INSURANCE_CLAIM_EXCLUDED_TITLE_PATTERNS: RegExp[] = [
+  /малын\s+индексжүүлсэн\s+даатгал/i,
+  /хадгаламжийн\s+даатгал/i,
+  /нийгмийн\s+даатгал/i,
   /эрүүгийн\s+хууль/i,
   /зөрчлийн\s+тухай/i,
   /цэргийн|сонгуулийн|татвар|хөдөлмөр|гэр\s+бүлийн/i,
@@ -1675,6 +1823,109 @@ function applyInsuranceClaimFiltering(
   }
 
   const filtered = results.filter((result) => isInsuranceClaimRelevantResult(query, result));
+
+  if (filtered.length === 0) {
+    return [];
+  }
+
+  return filtered.sort((a, b) => b.score - a.score);
+}
+
+const CONSUMER_REFUND_TITLE_PATTERNS: RegExp[] = [
+  /хэрэглэгчийн\s+эрхийг\s+хамгаалах/i,
+  /иргэний\s+хууль/i,
+];
+
+const CONSUMER_REFUND_TEXT_PATTERNS: RegExp[] = [
+  /хэрэглэгч|худалдан\s+авагч|худалдагч/i,
+  /бараа|бүтээгдэхүүн|үйлчилгээ|доголдол|чанаргүй|баталгаа/i,
+  /буцаалт|буцаах|солих|үнийг\s+бууруулах|мөнгө\s+буца|нөхөн\s*төлбөр/i,
+  /худалдах|худалдан\s+авах\s+гэрээ/i,
+];
+
+const CONSUMER_REFUND_EXCLUDED_TITLE_PATTERNS: RegExp[] = [
+  /эрүүгийн\s+хууль/i,
+  /даатгал/i,
+  /банк|зээл|хадгаламж/i,
+  /хөдөлмөр|гэр\s+бүлийн|татвар|сонгуулийн/i,
+];
+
+function isConsumerRefundRelevantResult(result: ChromaQueryResult): boolean {
+  const title = getMetaTitle(result.metadata);
+  if (CONSUMER_REFUND_EXCLUDED_TITLE_PATTERNS.some((pattern) => pattern.test(title))) {
+    return false;
+  }
+
+  const corpus = normalizeText(`${title} ${result.document?.slice(0, 1800) ?? ''}`);
+  const titleRelevant = CONSUMER_REFUND_TITLE_PATTERNS.some((pattern) => pattern.test(title));
+  const textSignalCount = countRegexMatches(corpus, CONSUMER_REFUND_TEXT_PATTERNS);
+
+  return titleRelevant || textSignalCount >= 2;
+}
+
+function applyConsumerRefundFiltering(
+  query: string,
+  results: ChromaQueryResult[],
+): ChromaQueryResult[] {
+  if (!isConsumerRefundQuery(query) || results.length === 0) {
+    return results;
+  }
+
+  const filtered = results.filter((result) => isConsumerRefundRelevantResult(result));
+
+  if (filtered.length === 0) {
+    return [];
+  }
+
+  return filtered.sort((a, b) => b.score - a.score);
+}
+
+const LABOR_DISMISSAL_TITLE_PATTERNS: RegExp[] = [
+  /хөдөлмөрийн\s+тухай/i,
+  /хөдөлмөр/i,
+];
+
+const LABOR_DISMISSAL_TEXT_PATTERNS: RegExp[] = [
+  /ажлаас|халах|халагд|цуцлах|дуусгавар|ажил\s+хүлээлцэх/i,
+  /цалин|олговор|ажилгүй\s+байсан\s+хугацаа|ажил\s+олгогч|ажилтан/i,
+  /хөдөлмөрийн\s+маргаан|нэхэмжлэл|шүүх/i,
+];
+
+const LABOR_DISMISSAL_EXCLUDED_TEXT_PATTERNS: RegExp[] = [
+  /ажил\s+үүрэг\s+гүйцэтгэхийг\s+түдгэлзүүлэх/i,
+  /хамтын\s+хэлэлцээр/i,
+  /дарамт|бэлгийн\s+дарамт/i,
+];
+
+function isLaborDismissalRelevantResult(result: ChromaQueryResult): boolean {
+  const title = getMetaTitle(result.metadata);
+  const corpus = normalizeText(`${title} ${result.document?.slice(0, 1800) ?? ''}`);
+
+  if (!LABOR_DISMISSAL_TITLE_PATTERNS.some((pattern) => pattern.test(title))) {
+    return false;
+  }
+
+  if (LABOR_DISMISSAL_EXCLUDED_TEXT_PATTERNS.some((pattern) => pattern.test(corpus))) {
+    const articleNo = String(result.metadata.articleNo ?? '');
+    if (!/78|79|80|82|83|110|111|112|123|124|125|126|127|128/i.test(articleNo)) {
+      return false;
+    }
+  }
+
+  const textSignalCount = countRegexMatches(corpus, LABOR_DISMISSAL_TEXT_PATTERNS);
+  const articleNo = String(result.metadata.articleNo ?? '');
+  return textSignalCount >= 1 || /78|79|80|82|83|110|111|112|123|124|125|126|127|128/i.test(articleNo);
+}
+
+function applyLaborDismissalFiltering(
+  query: string,
+  results: ChromaQueryResult[],
+): ChromaQueryResult[] {
+  if (!isLaborDismissalOrWageQuery(query) || results.length === 0) {
+    return results;
+  }
+
+  const filtered = results.filter((result) => isLaborDismissalRelevantResult(result));
 
   if (filtered.length === 0) {
     return [];
@@ -1927,7 +2178,30 @@ function isShortQuery(query: string): boolean {
 
 function isCyberFraudQuery(query: string): boolean {
   const normalized = normalizeText(query);
+  if (isConsumerRefundQuery(normalized)) {
+    return false;
+  }
   return CYBER_FRAUD_QUERY_PATTERN.test(normalized);
+}
+
+function isConsumerRefundQuery(query: string): boolean {
+  const normalized = normalizeText(query);
+  const hasConsumerTransaction =
+    /онлайн|интернет|дэлгүүр|худалдан|захиал|бүтээгдэхүүн|бараа|үйлчилгээ|хэрэглэгч/i.test(
+      normalized,
+    );
+  const hasRefundOrDefect =
+    /доголд|эвдэр|чанаргүй|таарахгүй|буцаалт|буцаах|мөнгө\s+буца|төлүүлэх|солих|баталгаа/i.test(
+      normalized,
+    );
+  return hasConsumerTransaction && hasRefundOrDefect;
+}
+
+function isLaborDismissalOrWageQuery(query: string): boolean {
+  const normalized = normalizeText(query);
+  return /ажлаас|халагд|халуул|халсан|ажил\s+олгогч|хөдөлмөр|цалин|олговор|үндэслэлгүй/i.test(
+    normalized,
+  );
 }
 
 function getRetrievalRuntimeConfig(
@@ -2079,6 +2353,20 @@ function buildSearchQueries(query: string, shortQuery: boolean, rewrittenQuery: 
   if (/хөдөлмөр|ажилтн|ажилч|ажил\s*олгогч|цалин|ажлаас/i.test(normalized)) {
     variants.add('хөдөлмөрийн тухай хууль');
     variants.add('хөдөлмөрийн тухай хууль ажилтан ажил олгогч');
+    variants.add('хөдөлмөрийн тухай хууль ажлаас халах хөдөлмөр эрхлэлтийн харилцаа дуусгавар');
+    variants.add('хөдөлмөрийн тухай хууль цалин хөлс ажилгүй байсан хугацаа маргаан');
+  }
+
+  if (isConsumerRefundQuery(normalized)) {
+    variants.add('хэрэглэгчийн эрхийг хамгаалах тухай хууль доголдолтой бараа буцаалт');
+    variants.add('иргэний хууль худалдах худалдан авах гэрээ доголдолтой бүтээгдэхүүн');
+    variants.add('хэрэглэгчийн эрх бараа бүтээгдэхүүн чанар буцаах солих мөнгө буцаах');
+  }
+
+  if (insuranceClaim) {
+    variants.add('даатгалын тухай хууль нөхөн төлбөр татгалзсан үндэслэл');
+    variants.add('иргэний хууль даатгалын гэрээ даатгалын тохиолдол нөхөн төлбөр');
+    variants.add('жолоочийн даатгалын тухай хууль нөхөн төлбөр хохирол');
   }
 
   if (shortQuery && normalized.length > 0) {
@@ -2132,9 +2420,11 @@ function buildSearchQueries(query: string, shortQuery: boolean, rewrittenQuery: 
       variants.add('үндсэн хууль сонгох эрх 18 нас');
     }
     if (/эд\s*хөрөнгө|үл\s*хөдлөх|өмч|өмчлөх|шилжүүл|худалдах|худалдан/i.test(normalized)) {
-      variants.add('иргэний хууль өмчлөх эрх шилжүүлэх');
-      variants.add('улсын бүртгэлийн ерөнхий хууль өмч шилжилт');
-      variants.add('үл хөдлөх эд хөрөнгийн барьцааны тухай');
+      if (!isConsumerRefundQuery(normalized)) {
+        variants.add('иргэний хууль өмчлөх эрх шилжүүлэх');
+        variants.add('улсын бүртгэлийн ерөнхий хууль өмч шилжилт');
+        variants.add('үл хөдлөх эд хөрөнгийн барьцааны тухай');
+      }
     }
   }
 
@@ -2597,6 +2887,12 @@ function buildSources(query: string, _mode: QueryMode, chunks: ChromaQueryResult
     if (isTrafficInsuranceClaimQuery(query) && !isInsuranceClaimRelevantResult(query, chunk)) {
       continue;
     }
+    if (isConsumerRefundQuery(query) && !isConsumerRefundRelevantResult(chunk)) {
+      continue;
+    }
+    if (isLaborDismissalOrWageQuery(query) && !isLaborDismissalRelevantResult(chunk)) {
+      continue;
+    }
     if (isPublicNoiseComplaintQuery(query) && !isPublicNoiseRelevantResult(chunk)) {
       continue;
     }
@@ -2777,6 +3073,12 @@ function buildRelatedLaws(
       continue;
     }
     if (isTrafficInsuranceClaimQuery(query) && !isInsuranceClaimRelevantResult(query, chunk)) {
+      continue;
+    }
+    if (isConsumerRefundQuery(query) && !isConsumerRefundRelevantResult(chunk)) {
+      continue;
+    }
+    if (isLaborDismissalOrWageQuery(query) && !isLaborDismissalRelevantResult(chunk)) {
       continue;
     }
     if (isPublicNoiseComplaintQuery(query) && !isPublicNoiseRelevantResult(chunk)) {

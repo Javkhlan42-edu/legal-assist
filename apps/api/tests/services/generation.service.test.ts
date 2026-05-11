@@ -256,6 +256,39 @@ describe('GenerationService', () => {
     expect(result.mode).toBe('fallback-general');
   });
 
+  it('does not misread online store defect/refund questions as cyber fraud', async () => {
+    const result = await generate(
+      { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Онлайн дэлгүүрээс худалдан авсан бүтээгдэхүүн доголдолтой ирсэн. Буцаалт төлүүлэхийг маргалж болох уу?',
+      [],
+      [],
+    );
+
+    expect(result.answer).toContain('доголдолтой');
+    expect(result.answer).toContain('буцаалт');
+    expect(result.answer).toContain('хэрэглэгч');
+    expect(result.answer).not.toContain('Цахим луйвар');
+    expect(result.answer).not.toContain('102');
+    expect(result.mode).toBe('fallback-general');
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it('answers labor dismissal and unpaid wage questions without suspension-law drift', async () => {
+    const result = await generate(
+      { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Үндэслэлгүй ажлаас халуулсан. Цалин төлүүлэхийг маргалж болох уу?',
+      [],
+      [],
+    );
+
+    expect(result.answer).toContain('ажлаас халсан');
+    expect(result.answer).toContain('цалин');
+    expect(result.answer).toContain('хөдөлмөр');
+    expect(result.answer).not.toContain('АЖИЛ ҮҮРЭГ ГҮЙЦЭТГЭХИЙГ ТҮДГЭЛЗҮҮЛЭХ');
+    expect(result.mode).toBe('fallback-general');
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
   it('answers cyber fraud questions immediately with practical police and bank steps', async () => {
     const result = await generate(
       { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
