@@ -238,21 +238,22 @@ export function registerChatRoute(app: FastifyInstance) {
 
       if (!workflowPlan.shouldSkipRetrieval) {
         const retrievalStart = Date.now();
-        const retrievalOutcome = await resolveWithTimeout(
-          search(app.env, workflowPlan.query, {
-            intentOverride: workflowPlan.intent,
-            preferredLawIds: workflowPlan.preferredLawIds,
-            enrichmentTerms: [
-              workflowPlan.rewrittenQuery,
-              ...workflowPlan.keywordProfile.expansionTerms,
-              ...workflowPlan.previousKeywords,
-            ],
-            carryForwardChunks: workflowPlan.carryForwardChunks,
-            carryForwardMode: workflowPlan.carryForwardMode,
-            keywordProfile: workflowPlan.keywordProfile,
-          }),
-          app.env.RETRIEVAL_TIMEOUT_MS,
-        );
+        const retrievalPromise = search(app.env, workflowPlan.query, {
+          intentOverride: workflowPlan.intent,
+          preferredLawIds: workflowPlan.preferredLawIds,
+          enrichmentTerms: [
+            workflowPlan.rewrittenQuery,
+            ...workflowPlan.keywordProfile.expansionTerms,
+            ...workflowPlan.previousKeywords,
+          ],
+          carryForwardChunks: workflowPlan.carryForwardChunks,
+          carryForwardMode: workflowPlan.carryForwardMode,
+          keywordProfile: workflowPlan.keywordProfile,
+        });
+        const retrievalOutcome =
+          app.env.RETRIEVAL_SPEED_MODE === 'quality'
+            ? { value: await retrievalPromise, timedOut: false as const }
+            : await resolveWithTimeout(retrievalPromise, app.env.RETRIEVAL_TIMEOUT_MS);
         retrievalLatencyMs = Date.now() - retrievalStart;
         retrievalTimedOut = retrievalOutcome.timedOut;
 
@@ -265,7 +266,7 @@ export function registerChatRoute(app: FastifyInstance) {
               timeoutMs: app.env.RETRIEVAL_TIMEOUT_MS,
               retrievalQuery: workflowPlan.query.slice(0, 320),
             },
-            'Retrieval timed out; continuing with fast fallback generation',
+            'Retrieval timed out; continuing with fallback generation',
           );
         } else {
           retrievalResult = retrievalOutcome.value ?? null;
@@ -721,21 +722,22 @@ export function registerChatRoute(app: FastifyInstance) {
 
       if (!workflowPlan.shouldSkipRetrieval) {
         const retrievalStart = Date.now();
-        const retrievalOutcome = await resolveWithTimeout(
-          search(app.env, workflowPlan.query, {
-            intentOverride: workflowPlan.intent,
-            preferredLawIds: workflowPlan.preferredLawIds,
-            enrichmentTerms: [
-              workflowPlan.rewrittenQuery,
-              ...workflowPlan.keywordProfile.expansionTerms,
-              ...workflowPlan.previousKeywords,
-            ],
-            carryForwardChunks: workflowPlan.carryForwardChunks,
-            carryForwardMode: workflowPlan.carryForwardMode,
-            keywordProfile: workflowPlan.keywordProfile,
-          }),
-          app.env.RETRIEVAL_TIMEOUT_MS,
-        );
+        const retrievalPromise = search(app.env, workflowPlan.query, {
+          intentOverride: workflowPlan.intent,
+          preferredLawIds: workflowPlan.preferredLawIds,
+          enrichmentTerms: [
+            workflowPlan.rewrittenQuery,
+            ...workflowPlan.keywordProfile.expansionTerms,
+            ...workflowPlan.previousKeywords,
+          ],
+          carryForwardChunks: workflowPlan.carryForwardChunks,
+          carryForwardMode: workflowPlan.carryForwardMode,
+          keywordProfile: workflowPlan.keywordProfile,
+        });
+        const retrievalOutcome =
+          app.env.RETRIEVAL_SPEED_MODE === 'quality'
+            ? { value: await retrievalPromise, timedOut: false as const }
+            : await resolveWithTimeout(retrievalPromise, app.env.RETRIEVAL_TIMEOUT_MS);
         retrievalLatencyMs = Date.now() - retrievalStart;
         retrievalTimedOut = retrievalOutcome.timedOut;
 
@@ -749,7 +751,7 @@ export function registerChatRoute(app: FastifyInstance) {
               retrievalQuery: workflowPlan.query.slice(0, 320),
               streaming: true,
             },
-            'Retrieval timed out; continuing streamed response with fast fallback generation',
+            'Retrieval timed out; continuing streamed response with fallback generation',
           );
         } else {
           retrievalResult = retrievalOutcome.value ?? null;

@@ -1305,17 +1305,8 @@ function resolveIntent(query: string, history: ChatMessage[]): QueryIntent {
     return direct;
   }
 
-  const recentContext = history
-    .slice(-6)
-    .map((item) => item.content)
-    .join(' ')
-    .trim();
-
-  if (!recentContext) {
-    return 'unknown';
-  }
-
-  return classifyLegalIntent(recentContext);
+  void history;
+  return 'unknown';
 }
 
 function buildWeakContextClarificationResult(

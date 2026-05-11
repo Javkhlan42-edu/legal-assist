@@ -74,7 +74,7 @@ function makeLaborDismissalSnapshotRecord(): MessageRecord {
 }
 
 describe('ChatWorkflowService', () => {
-  it('continues a short evidence follow-up from the previous legal snapshot without retrieval', () => {
+  it('continues a short evidence follow-up from the previous legal snapshot while still retrieving fresh sources', () => {
     const plan = planChatWorkflow({
       message: 'Ямар баримт бүрдүүлэх хэрэгтэй вэ?',
       history: makeLaborDismissalHistory(),
@@ -85,8 +85,9 @@ describe('ChatWorkflowService', () => {
     expect(plan.scope.scope).toBe('legal');
     expect(plan.intent).toBe('labor');
     expect(plan.usesHistoryContext).toBe(true);
-    expect(plan.carryForwardMode).toBe('clarify_skip_retrieval');
-    expect(plan.shouldSkipRetrieval).toBe(true);
+    expect(plan.carryForwardMode).toBe('reuse_same_law');
+    expect(plan.shouldSkipRetrieval).toBe(false);
+    expect(plan.nodes).toContain('retrieve_node');
     expect(plan.carryForwardChunks.length).toBeGreaterThan(0);
   });
 
@@ -100,8 +101,9 @@ describe('ChatWorkflowService', () => {
     expect(plan.earlyResponse).toBeUndefined();
     expect(plan.scope.scope).toBe('legal');
     expect(plan.intent).toBe('labor');
-    expect(plan.carryForwardMode).toBe('clarify_skip_retrieval');
-    expect(plan.shouldSkipRetrieval).toBe(true);
+    expect(plan.carryForwardMode).toBe('reuse_same_law');
+    expect(plan.shouldSkipRetrieval).toBe(false);
+    expect(plan.nodes).toContain('retrieve_node');
   });
 
   it('combines supplemental bank loan facts with the previous question for retrieval', () => {
@@ -141,5 +143,39 @@ describe('ChatWorkflowService', () => {
     expect(plan.scope.scope).toBe('non_legal');
     expect(plan.earlyResponse?.mode).toBe('no-info');
     expect(plan.shouldSkipRetrieval).toBe(true);
+  });
+  it('does not reuse cyber-fraud history for a new consumer refund question', () => {
+    const plan = planChatWorkflow({
+      message: 'Онлайн дэлгүүрээс авсан бүтээгдэхүүн доголдолтой ирсэн. Буцаалт төлүүлэхийг маргалж болох уу?',
+      history: [
+        { role: 'user', content: 'цахим луйварт өртсөн бол ямар арга хэмжээ авах вэ' },
+        { role: 'assistant', content: 'Банк болон цагдаад яаралтай мэдэгдэнэ.' },
+      ],
+      messageRecords: [],
+    });
+
+    expect(plan.scope.scope).toBe('legal');
+    expect(plan.intent).toBe('contract');
+    expect(plan.usesHistoryContext).toBe(false);
+    expect(plan.shouldSkipRetrieval).toBe(false);
+    expect(plan.query).not.toContain('цахим луйвар');
+  });
+
+  it('does not carry bank-loan context into a separate insurance compensation question', () => {
+    const plan = planChatWorkflow({
+      message: 'Даатгалын компани камер бичлэг байхгүй гэдгээр нөхөн төлбөр өгөхгүй байна. Маргалж болох уу?',
+      history: [
+        { role: 'user', content: 'Банкнаас авсан зээлийг 2 сар төлөөгүй бол ямар хариуцлага үүсэх вэ?' },
+        { role: 'assistant', content: 'Зээлийн гэрээ, хүү, алданги, барьцааны нөхцөлийг шалгана.' },
+      ],
+      messageRecords: [],
+    });
+
+    expect(plan.scope.scope).toBe('legal');
+    expect(plan.intent).toBe('contract');
+    expect(plan.usesHistoryContext).toBe(false);
+    expect(plan.carryForwardMode).toBe('full_refresh');
+    expect(plan.shouldSkipRetrieval).toBe(false);
+    expect(plan.query).not.toContain('Банкнаас авсан зээл');
   });
 });

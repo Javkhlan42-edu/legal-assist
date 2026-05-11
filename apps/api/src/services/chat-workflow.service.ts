@@ -389,6 +389,70 @@ function isSupplementalFactFollowUpQuery(
   return hasEnoughLegalTerms && hasSupplementalFact;
 }
 
+type FineTopic =
+  | 'bank_loan'
+  | 'insurance'
+  | 'consumer'
+  | 'labor'
+  | 'traffic'
+  | 'family'
+  | 'crime'
+  | 'rental'
+  | 'unknown';
+
+function detectFineTopic(text: string, extraTerms: string[] = []): FineTopic {
+  const normalized = normalizeText([text, ...extraTerms].join(' '));
+
+  if (/ажлаас|халсан|халах|ажил\s*олгогч|хөдөлмөр|цалин/i.test(normalized)) {
+    return 'labor';
+  }
+
+  if (/түрээс|түрээсл|барьцаа\s*буцаах|түрээсийн\s*барьцаа/i.test(normalized)) {
+    return 'rental';
+  }
+
+  if (/банк|зээл|зээлийн|нэмэгдүүлсэн\s*хүү|алданги|барьцаа.{0,24}зээл|зээл.{0,24}барьцаа/i.test(normalized)) {
+    return 'bank_loan';
+  }
+
+  if (/даатгал|даатгагч|нөхөн\s*төлбөр|каско/i.test(normalized)) {
+    return 'insurance';
+  }
+
+  if (/онлайн\s*дэлгүүр|дэлгүүр|доголдол|буцаалт|хэрэглэгч|бараа|захиалга|баталгаа/i.test(normalized)) {
+    return 'consumer';
+  }
+
+  if (/машин|авто|жолооч|замын\s*хөдөлгөөн|осол|мөрг|шүрг|зогсоол/i.test(normalized)) {
+    return 'traffic';
+  }
+
+  if (/гэр\s*бүл|салалт|хүүхэд|асрамж|тэтгэлэг/i.test(normalized)) {
+    return 'family';
+  }
+
+  if (/эрүүгийн|гэмт\s*хэрэг|хулгай|залилан|луйвар|авлиг|хахууль|цагдаа/i.test(normalized)) {
+    return 'crime';
+  }
+
+  return 'unknown';
+}
+
+function isHardTopicMismatch(currentTopic: FineTopic, previousTopic: FineTopic): boolean {
+  if (currentTopic === 'unknown' || previousTopic === 'unknown' || currentTopic === previousTopic) {
+    return false;
+  }
+
+  const compatiblePairs = new Set([
+    'traffic:insurance',
+    'insurance:traffic',
+    'consumer:insurance',
+    'insurance:consumer',
+  ]);
+
+  return !compatiblePairs.has(`${currentTopic}:${previousTopic}`);
+}
+
 function isShortAmbiguousQuery(query: string): boolean {
   const normalized = normalizeText(query);
   if (normalized.length >= 8) {
@@ -413,15 +477,37 @@ function selectRelevantHistory(
     content: compactText(item.content),
   }));
 
-  const historyProfile = extractRetrievalKeywordProfile(
-    recentWindow
-      .filter((item) => item.role === 'user')
-      .map((item) => item.content)
-      .join(' '),
-  );
+  const recentUserText = recentWindow
+    .filter((item) => item.role === 'user')
+    .map((item) => item.content)
+    .join(' ');
+  const historyProfile = extractRetrievalKeywordProfile(recentUserText);
 
   const overlap = countKeywordOverlap(currentTokens, historyProfile.topicalTerms);
   const looksLikeFollowUp = isContextualFollowUpQuery(message, keywordProfile);
+  const directCurrentIntent = classifyLegalIntent(message);
+  const directHistoryIntent = classifyLegalIntent(recentUserText);
+  const currentIntent =
+    directCurrentIntent !== 'unknown' ? directCurrentIntent : keywordProfile.primaryDomain;
+  const historyIntent =
+    directHistoryIntent !== 'unknown' ? directHistoryIntent : historyProfile.primaryDomain;
+
+  if (
+    !looksLikeFollowUp &&
+    currentIntent !== 'unknown' &&
+    historyIntent !== 'unknown' &&
+    currentIntent !== historyIntent
+  ) {
+    return [];
+  }
+
+  const currentFineTopic = detectFineTopic(message, keywordProfile.topicalTerms);
+  const historyFineTopic = detectFineTopic(recentUserText, historyProfile.topicalTerms);
+
+  if (!looksLikeFollowUp && isHardTopicMismatch(currentFineTopic, historyFineTopic)) {
+    return [];
+  }
+
   const normalized = normalizeText(message);
   const supplementalFactFollowUp =
     normalized.length <= 180 &&
@@ -482,11 +568,30 @@ function resolveCarryForwardMode(
     intent !== snapshotIntent &&
     keywordProfile.topicalTerms.length >= 4 &&
     !looksLikeFollowUp;
+  const currentFineTopic = detectFineTopic(message, keywordProfile.topicalTerms);
+  const snapshotFineTopic = detectFineTopic(snapshotLawTitles.join(' '), previousKeywords);
+  const currentHasFreshTopic =
+    keywordProfile.topicalTerms.length >= 3 &&
+    !looksLikeFollowUp &&
+    isHardTopicMismatch(currentFineTopic, snapshotFineTopic);
+
+  if (currentHasFreshTopic) {
+    return {
+      mode: 'full_refresh',
+      chunks: [],
+      sources: [],
+      relatedLaws: [],
+      relatedCases: [],
+      preferredLawIds: [],
+      previousKeywords: [],
+    };
+  }
 
   if (isClarifyPattern(message)) {
+    const half = Math.max(2, Math.ceil(carryChunks.length / 2));
     return {
-      mode: 'clarify_skip_retrieval',
-      chunks: carryChunks,
+      mode: 'reuse_same_law',
+      chunks: carryChunks.slice(0, half),
       sources: carrySources,
       relatedLaws: carryRelatedLaws,
       relatedCases: carryRelatedCases,
@@ -692,35 +797,6 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
   const preferredLawIds = Array.from(
     new Set([...basePreferredLawIds, ...carryForward.preferredLawIds]),
   );
-
-  if (carryForward.mode === 'clarify_skip_retrieval') {
-    nodes.push('reasoning_node', 'synthesize_node');
-    return {
-      nodes,
-      normalizedQuery,
-      rewrittenQuery: effectiveRewrittenQuery,
-      scope,
-      intent: effectiveIntent,
-      preferredLawIds,
-      relevantHistory,
-      usesHistoryContext,
-      carryForwardMode: carryForward.mode,
-      carryForwardChunks: carryForward.chunks,
-      carryForwardSources: carryForward.sources,
-      carryForwardRelatedLaws: carryForward.relatedLaws,
-      carryForwardRelatedCases: carryForward.relatedCases,
-      keywordProfile,
-      previousKeywords: carryForward.previousKeywords,
-      query: mergeRetrievalQuery(
-        normalizedQuery,
-        effectiveRewrittenQuery,
-        keywordProfile,
-        carryForward.previousKeywords,
-        relevantHistory,
-      ),
-      shouldSkipRetrieval: true,
-    };
-  }
 
   nodes.push('retrieve_node', 'reasoning_node', 'synthesize_node');
   return {
