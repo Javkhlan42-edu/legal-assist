@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: legal_chatbot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d legal_chatbot']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    image: ${API_IMAGE}
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_PORT: 3001
+      API_HOST: 0.0.0.0
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
+      VECTOR_DB_PROVIDER: pgvector
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-3072}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5.4}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-180000}
+      RETRIEVAL_SPEED_MODE: ${RETRIEVAL_SPEED_MODE:-quality}
+      RETRIEVAL_TIMEOUT_MS: ${RETRIEVAL_TIMEOUT_MS:-180000}
+      GENERATION_TIMEOUT_MS: ${GENERATION_TIMEOUT_MS:-180000}
+      RESPONSE_LATENCY_BUDGET_MS: ${RESPONSE_LATENCY_BUDGET_MS:-240000}
+      INCLUDE_RELATED_CASES: ${INCLUDE_RELATED_CASES:-auto}
+      USE_CROSS_RERANKER: ${USE_CROSS_RERANKER:-false}
+      JWT_SECRET: ${JWT_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://localhost:3001/health\").then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE}
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: ${WORKER_IMAGE}
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
+      VECTOR_DB_PROVIDER: pgvector
+      VECTOR_DB_FALLBACK: 'false'
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-3072}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      PIPELINE_FAIL_FAST: ${PIPELINE_FAIL_FAST:-false}
+      PIPELINE_MAX_CONSECUTIVE_FAILURES: ${PIPELINE_MAX_CONSECUTIVE_FAILURES:-20}
+      CRAWL_DELAY_MS: ${CRAWL_DELAY_MS:-1000}
+      CRAWL_MAX_CONCURRENT: ${CRAWL_MAX_CONCURRENT:-1}
+    command: ['pnpm', 'exec', 'tsx', 'src/index.ts', 'schedule']
+    volumes:
+      - workerdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - '${PUBLIC_HTTP_PORT:-80}:80'
+    volumes:
+      - ./nginx.aws.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost/health >/dev/null 2>&1']
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  workerdata:
