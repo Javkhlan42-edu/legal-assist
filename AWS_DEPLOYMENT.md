@@ -85,7 +85,7 @@ http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com/health
 While testing through the raw ALB URL, include that HTTP origin in `CORS_ORIGIN`; otherwise login/signup POST requests will be rejected by the API CORS guard. The SSH fallback script adds this automatically:
 
 ```text
-CORS_ORIGIN=https://hop-on.dev,http://hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com
+CORS_ORIGIN=https://hop-on.dev,https://www.hop-on.dev,http://hop-on.dev,http://www.hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com
 ```
 
 ## 4. Domain and HTTPS
@@ -102,6 +102,18 @@ Final production URL:
 https://hop-on.dev
 ```
 
+Current status:
+
+```text
+hop-on.dev and www.hop-on.dev are delegated to Route53.
+Route53 A alias records point to legal-assist-alb.
+ACM certificate is ISSUED in ap-southeast-1.
+ALB HTTPS listener on port 443 is attached.
+Smoke tests:
+  https://hop-on.dev/health -> 200
+  https://hop-on.dev/auth -> 200
+```
+
 Current hosted zone name servers:
 
 ```text
@@ -111,14 +123,14 @@ ns-1099.awsdns-09.org
 ns-797.awsdns-35.net
 ```
 
-Current AWS user still needs these permissions before `hop-on.dev` and HTTPS can be completed automatically:
+The GitHub Actions AWS user needs these permissions for future automated DNS and HTTPS updates:
 
 - `acm:ListCertificates`
 - `acm:RequestCertificate`
 - `acm:DescribeCertificate`
 - `route53:ChangeResourceRecordSets`
 
-After those permissions are added, rerun the deployment script or the GitHub workflow to create the ACM DNS validation record, the `hop-on.dev` A alias, and the HTTPS listener.
+These permissions were added during the initial production domain setup. Keep them attached if future deploys should be able to renew DNS validation records, recreate certificates, or repair the HTTPS listener automatically.
 
 ## 5. Retrieval Data on AWS
 
