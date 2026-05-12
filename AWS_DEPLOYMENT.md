@@ -120,9 +120,43 @@ Current AWS user still needs these permissions before `hop-on.dev` and HTTPS can
 
 After those permissions are added, rerun the deployment script or the GitHub workflow to create the ACM DNS validation record, the `hop-on.dev` A alias, and the HTTPS listener.
 
-## 5. First Data Ingestion
+## 5. Retrieval Data on AWS
 
-After the first deploy, the database is empty unless you migrated data separately. Run ingestion through SSM or Session Manager on the EC2 host:
+The AWS deployment uses the PostgreSQL container on the EC2 host with the persistent Docker volume `docker_pgdata`. The API and worker connect to it through:
+
+```text
+DATABASE_URL=postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
+VECTOR_DB_PROVIDER=pgvector
+```
+
+Docker images do not contain the production retrieval database. To make AWS behave like the local environment, copy the local `documents` and `chunks` tables, including pgvector embeddings, into the EC2 PostgreSQL volume:
+
+```powershell
+docker exec legal-chatbot-postgres pg_dump -U postgres -d legal_chatbot -Fc --data-only -t public.documents -t public.chunks -f /tmp/retrieval-documents-chunks.dump
+docker cp legal-chatbot-postgres:/tmp/retrieval-documents-chunks.dump .\deploy-artifacts\retrieval-documents-chunks.dump
+scp -i C:\Users\user\.ssh\legal-assist-key.pem .\deploy-artifacts\retrieval-documents-chunks.dump ubuntu@<EC2_PUBLIC_IP>:/tmp/retrieval-documents-chunks.dump
+ssh -i C:\Users\user\.ssh\legal-assist-key.pem ubuntu@<EC2_PUBLIC_IP> "docker exec docker-postgres-1 psql -U postgres -d legal_chatbot -c 'TRUNCATE TABLE chunks, documents CASCADE;' && cat /tmp/retrieval-documents-chunks.dump | docker exec -i docker-postgres-1 pg_restore -U postgres -d legal_chatbot --data-only --single-transaction --disable-triggers && docker exec docker-postgres-1 psql -U postgres -d legal_chatbot -c 'ANALYZE documents; ANALYZE chunks;'"
+```
+
+Current restored retrieval dataset:
+
+```text
+documents=2153
+chunks=64455
+chunks_with_embedding=64455
+legalinfo_chunks=57043
+shuukh_chunks=7412
+embedding_dimensions=3072
+```
+
+Verify after restore:
+
+```sql
+SELECT count(*) FROM chunks WHERE embedding IS NOT NULL;
+SELECT metadata->>'source' AS source, count(*) FROM chunks GROUP BY 1;
+```
+
+If you want AWS to crawl and embed fresh data instead of restoring from local, run ingestion on the EC2 host:
 
 ```bash
 cd /opt/legal-assist
