@@ -10,7 +10,7 @@ on:
       instance_type:
         description: EC2 instance type
         required: false
-        default: t3.large
+        default: t3.micro
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION || 'ap-southeast-1' }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   DOMAIN_NAME: ${{ github.event.inputs.domain_name || 'hop-on.dev' }}
-  INSTANCE_TYPE: ${{ github.event.inputs.instance_type || 't3.large' }}
+  INSTANCE_TYPE: ${{ github.event.inputs.instance_type || 't3.micro' }}
   GIT_REF: ${{ github.ref_name }}
 
 jobs:

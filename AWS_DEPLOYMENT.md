@@ -44,7 +44,45 @@ The workflow will:
 5. Deploy the new ECR images to EC2 through AWS SSM.
 6. Run a public health check.
 
-## 3. Domain and HTTPS
+If GitHub Actions runners are unavailable or the AWS user does not yet have IAM/SSM permission, use the local SSH fallback below.
+
+## 3. Local SSH/ECR Fallback
+
+The current deployment was completed with the SSH fallback because GitHub Actions did not provide a usable runner log and the AWS user does not have IAM/SSM/ACM/Route53 record-change permission yet.
+
+Run from PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\aws\deploy-local-ssh-ecr.ps1 `
+  -CredentialsCsv "C:\Users\user\Downloads\github-actions_accessKeys.csv" `
+  -GitRef "deploy/aws-ec2-ecr-https" `
+  -InstanceType "t3.micro"
+```
+
+This fallback:
+
+1. Verifies AWS credentials and account.
+2. Creates or reuses ECR repositories.
+3. Creates or reuses a Free Tier compatible EC2 instance, ALB, target group, and security groups.
+4. Installs Docker on EC2 and enables a 6GB swap file for small-instance builds.
+5. Builds `api`, `web`, and `worker` images on EC2.
+6. Pushes the images to ECR.
+7. Runs `docker/docker-compose.ecr.yml` with the generated production env.
+
+Current public smoke-test URL:
+
+```text
+http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com
+```
+
+Health check:
+
+```text
+http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com/health
+```
+
+## 4. Domain and HTTPS
 
 If the Route53 hosted zone for `hop-on.dev` is newly created, copy the hosted zone name servers from the workflow logs and set them at the domain registrar.
 
@@ -58,29 +96,47 @@ Final production URL:
 https://hop-on.dev
 ```
 
-## 4. First Data Ingestion
+Current hosted zone name servers:
+
+```text
+ns-89.awsdns-11.com
+ns-1940.awsdns-50.co.uk
+ns-1099.awsdns-09.org
+ns-797.awsdns-35.net
+```
+
+Current AWS user still needs these permissions before `hop-on.dev` and HTTPS can be completed automatically:
+
+- `acm:ListCertificates`
+- `acm:RequestCertificate`
+- `acm:DescribeCertificate`
+- `route53:ChangeResourceRecordSets`
+
+After those permissions are added, rerun the deployment script or the GitHub workflow to create the ACM DNS validation record, the `hop-on.dev` A alias, and the HTTPS listener.
+
+## 5. First Data Ingestion
 
 After the first deploy, the database is empty unless you migrated data separately. Run ingestion through SSM or Session Manager on the EC2 host:
 
 ```bash
 cd /opt/legal-assist
-docker compose -f docker/docker-compose.ecr.yml exec worker pnpm exec tsx src/index.ts ingest --source legalinfo --limit 938 --fresh
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec worker pnpm exec tsx src/index.ts ingest --source legalinfo --limit 938 --fresh
 ```
 
 For Shuukh cases:
 
 ```bash
-docker compose -f docker/docker-compose.ecr.yml exec worker pnpm exec tsx src/index.ts ingest --source shuukh --limit 1500 --fresh
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec worker pnpm exec tsx src/index.ts ingest --source shuukh --limit 1500 --fresh
 ```
 
-## 5. Useful Commands
+## 6. Useful Commands
 
 ```bash
-docker compose -f docker/docker-compose.ecr.yml ps
-docker compose -f docker/docker-compose.ecr.yml logs -f api
-docker compose -f docker/docker-compose.ecr.yml logs -f web
-docker compose -f docker/docker-compose.ecr.yml logs -f worker
-docker compose -f docker/docker-compose.ecr.yml restart api web nginx
+docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
+docker compose --env-file .env -f docker/docker-compose.ecr.yml logs -f api
+docker compose --env-file .env -f docker/docker-compose.ecr.yml logs -f web
+docker compose --env-file .env -f docker/docker-compose.ecr.yml logs -f worker
+docker compose --env-file .env -f docker/docker-compose.ecr.yml restart api web nginx
 ```
 
 ## Notes

@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="${APP_NAME:-legal-assist}"
 DOMAIN_NAME="${DOMAIN_NAME:-hop-on.dev}"
 AWS_REGION="${AWS_REGION:-ap-southeast-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-t3.large}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-t3.micro}"
 ROOT_VOLUME_SIZE="${ROOT_VOLUME_SIZE:-80}"
 SSM_ENV_PARAMETER="${SSM_ENV_PARAMETER:-/${APP_NAME}/prod/env}"
 
@@ -153,7 +153,7 @@ if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git jq unzip awscli
+apt-get install -y ca-certificates curl git jq unzip
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | tee /etc/apt/keyrings/docker.asc >/dev/null
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -161,6 +161,13 @@ chmod a+r /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+if [ ! -f /swapfile ]; then
+  fallocate -l 6G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=6144
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
 systemctl enable --now docker
 usermod -aG docker ubuntu || true
 snap install amazon-ssm-agent --classic || true
