@@ -25,7 +25,7 @@ services:
       API_PORT: 3001
       API_HOST: 0.0.0.0
       CORS_ORIGIN: ${CORS_ORIGIN}
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot}
       VECTOR_DB_PROVIDER: pgvector
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-3072}
@@ -73,7 +73,7 @@ services:
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot}
       VECTOR_DB_PROVIDER: pgvector
       VECTOR_DB_FALLBACK: 'false'
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}

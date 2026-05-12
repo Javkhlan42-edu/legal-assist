@@ -119,8 +119,21 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
+          from urllib.parse import quote
 
           path = Path(".env")
+          existing = path.read_text().splitlines() if path.exists() else []
+          existing_values = {}
+          for line in existing:
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key, value = line.split("=", 1)
+                  existing_values[key.strip()] = value
+
+          db_password = existing_values.get("DB_PASSWORD", "")
+          database_url = existing_values.get("DATABASE_URL", "")
+          if not database_url and db_password:
+              database_url = f"postgresql://postgres:{quote(db_password, safe='')}@postgres:5432/legal_chatbot"
+
           overrides = {
               "API_IMAGE": os.environ["API_IMAGE"],
               "WEB_IMAGE": os.environ["WEB_IMAGE"],
@@ -130,7 +143,8 @@ jobs:
               "CORS_ORIGIN": "https://hop-on.dev,https://www.hop-on.dev,http://hop-on.dev,http://www.hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com",
               "NEXT_PUBLIC_API_URL": "",
           }
-          existing = path.read_text().splitlines() if path.exists() else []
+          if database_url:
+              overrides["DATABASE_URL"] = database_url
           kept = []
           for line in existing:
               key = line.split("=", 1)[0].strip() if "=" in line else ""
