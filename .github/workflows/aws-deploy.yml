@@ -29,7 +29,7 @@ env:
 
 jobs:
   deploy:
-    name: Build, Push, Provision, Deploy
+    name: Build, Push, Deploy
     runs-on: [self-hosted, legal-assist-deploy]
 
     steps:
@@ -86,37 +86,69 @@ jobs:
             echo "WORKER_IMAGE=$WORKER_IMAGE"
           } >> "$GITHUB_ENV"
 
-      - name: Store production env in SSM SecureString
+      - name: Deploy images on EC2 host
         env:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           set -euo pipefail
-          if [ -z "$PRODUCTION_ENV" ]; then
-            echo "PRODUCTION_ENV GitHub secret is required." >&2
+
+          APP_DIR="/opt/legal-assist"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+
+          sudo mkdir -p "$APP_DIR"
+          sudo chown -R "$USER:$USER" "$APP_DIR"
+
+          if [ ! -d "$APP_DIR/.git" ]; then
+            rm -rf "$APP_DIR"
+            git clone "$REPO_URL" "$APP_DIR"
+          fi
+
+          cd "$APP_DIR"
+          git remote set-url origin "$REPO_URL"
+          git fetch origin "$GIT_REF"
+          git checkout "$GIT_REF"
+          git pull --ff-only origin "$GIT_REF"
+
+          if [ -n "$PRODUCTION_ENV" ]; then
+            printf '%s\n' "$PRODUCTION_ENV" > .env
+          elif [ ! -f .env ]; then
+            echo "PRODUCTION_ENV GitHub secret is empty and $APP_DIR/.env does not exist." >&2
             exit 1
           fi
-          aws ssm put-parameter \
-            --name "/${APP_NAME}/prod/env" \
-            --type SecureString \
-            --value "$PRODUCTION_ENV" \
-            --overwrite >/dev/null
 
-      - name: Provision EC2, ALB, ACM, Route53
-        id: provision
-        run: bash scripts/aws/provision-ec2-alb.sh
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-      - name: Deploy images to EC2 with SSM
-        run: bash scripts/aws/deploy-ec2-ecr.sh
+          path = Path(".env")
+          overrides = {
+              "API_IMAGE": os.environ["API_IMAGE"],
+              "WEB_IMAGE": os.environ["WEB_IMAGE"],
+              "WORKER_IMAGE": os.environ["WORKER_IMAGE"],
+              "AWS_REGION": os.environ["AWS_REGION"],
+              "DOMAIN_NAME": os.environ["DOMAIN_NAME"],
+              "CORS_ORIGIN": "https://hop-on.dev,https://www.hop-on.dev,http://hop-on.dev,http://www.hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com",
+              "NEXT_PUBLIC_API_URL": "",
+          }
+          existing = path.read_text().splitlines() if path.exists() else []
+          kept = []
+          for line in existing:
+              key = line.split("=", 1)[0].strip() if "=" in line else ""
+              if key not in overrides:
+                  kept.append(line)
+          for key, value in overrides.items():
+              kept.append(f"{key}={value}")
+          path.write_text("\n".join(kept) + "\n")
+          PY
+
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${API_IMAGE%%/*}"
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
 
       - name: Public health check
         run: |
           set -euo pipefail
-          ALB_DNS="${{ steps.provision.outputs.alb_dns }}"
-          CERT_STATUS="${{ steps.provision.outputs.cert_status }}"
-          if [ "$CERT_STATUS" = "ISSUED" ]; then
-            URL="https://${DOMAIN_NAME}/health"
-          else
-            URL="http://${ALB_DNS}/health"
-          fi
+          URL="https://${DOMAIN_NAME}/health"
           echo "Checking $URL"
           curl --fail --retry 20 --retry-delay 10 "$URL"

@@ -41,16 +41,15 @@ The workflow will:
 
 1. Create ECR repositories if missing.
 2. Build and push production images.
-3. Store `PRODUCTION_ENV` in SSM Parameter Store as a SecureString.
-4. Create or reuse EC2, IAM role, security groups, ALB, target group, ACM certificate, and Route53 hosted zone.
-5. Deploy the new ECR images to EC2 through AWS SSM.
-6. Run a public health check.
+3. Sync `PRODUCTION_ENV` into `/opt/legal-assist/.env` on the EC2 self-hosted runner.
+4. Pull and restart the new ECR images with Docker Compose.
+5. Run a public HTTPS health check.
 
-If GitHub Actions runners are unavailable or the AWS user does not yet have IAM/SSM permission, use the local SSH fallback below.
+If GitHub Actions is unavailable or the self-hosted runner is offline, use the local SSH fallback below.
 
 ## 3. Local SSH/ECR Fallback
 
-The current deployment was completed with the SSH fallback because GitHub Actions did not provide a usable runner log and the AWS user does not have IAM/SSM/ACM/Route53 record-change permission yet.
+The first deployment was completed with the SSH fallback. The automated pipeline now uses the EC2 self-hosted GitHub Actions runner for push-based deploys.
 
 Run from PowerShell:
 
