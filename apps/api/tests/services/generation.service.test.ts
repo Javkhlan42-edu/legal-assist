@@ -359,4 +359,51 @@ describe('GenerationService', () => {
     expect(result.answer).toContain('камер');
     expect(result.answer).toContain('Практик зөвлөгөө');
   });
+
+  it('cleans raw legalinfo prefixes from fallback law explanations', async () => {
+    const rawLaborChunk = makeLaborDismissalChunk({
+      document:
+        'Хууль: ХӨДӨЛМӨРИЙН ТУХАЙ /Шинэчилсэн найруулга/ Зүйл: 78 ХӨДӨЛМӨР ЭРХЛЭЛТИЙН ХАРИЛЦАА ДУУСГАВАР БОЛОХ ҮНДЭСЛЭЛ 78 дугаар зүйл. Ажил олгогч хөдөлмөр эрхлэлтийн харилцааг хуульд заасан үндэслэлээр дуусгавар болгоно.',
+    });
+    rerankMock.mockResolvedValue([rawLaborChunk]);
+
+    const result = await generate(
+      { OPENAI_API_KEY: '', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Ажлаас үндэслэлгүй халагдсан бол яаж шийдвэрлэх вэ?',
+      [rawLaborChunk],
+      [],
+    );
+
+    expect(result.answer).not.toContain('Хууль:');
+    expect(result.answer).not.toContain('Зүйл: 78');
+    expect(result.answer).toContain('Хөдөлмөр');
+    expect(result.answer).toContain('Практик зөвлөгөө');
+  });
+
+  it('replaces raw LLM dump responses with structured QA guidance', async () => {
+    const trafficChunk = makeTrafficChunk({
+      document:
+        'Хууль: ЗАМЫН ХӨДӨЛГӨӨНИЙ АЮУЛГҮЙ БАЙДЛЫН ТУХАЙ Зүйл: 5 Жолооч осол гарсан үед ослын газрыг хамгаалж цагдаад мэдэгдэнэ.',
+    });
+    rerankMock.mockResolvedValue([trafficChunk]);
+    chatCompletionMock.mockResolvedValue({
+      text:
+        'LLM үйлчилгээ түр боломжгүй байна. Доорх контекстээс олдсон гол мэдээлэл:\n\nХууль: ЗАМЫН ХӨДӨЛГӨӨНИЙ АЮУЛГҮЙ БАЙДЛЫН ТУХАЙ Зүйл: 5 ...\nCONFIDENCE: 0.40',
+      promptTokens: 77,
+      completionTokens: 18,
+    });
+
+    const result = await generate(
+      { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Машин барьж явж байгаад машин шүргэчлээ яаж шийдвэрлэх вэ?',
+      [trafficChunk],
+      [],
+    );
+
+    expect(result.answer).not.toContain('LLM үйлчилгээ');
+    expect(result.answer).not.toContain('Доорх контекст');
+    expect(result.answer).not.toContain('Хууль:');
+    expect(result.answer).toContain('Яг одоо хийх алхам');
+    expect(result.answer).toContain('Практик зөвлөгөө');
+  });
 });

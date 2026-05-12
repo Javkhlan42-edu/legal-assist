@@ -62,6 +62,15 @@ const COURT_PRACTICE_SYSTEM_APPENDIX = `ШҮҮХИЙН ПРАКТИК АШИГЛ
 - Шүүхийн кейсийг хууль, зүйл, заалтын оронд орлуулахгүй.
 - Төстэй кейс орсон бол "Шүүхийн практик" гэсэн богино хэсэгт кейсийн дугаар, гол төстэй нөхцөл, анхаарах эрсдэлийг л дурд.`;
 
+const QUALITY_FIRST_SYSTEM_APPENDIX = `ЧАНАР НЭГДҮГЭЭРТ:
+- Хурд биш, зөв ойлголт ба зөв тайлбар хамгийн чухал.
+- Одоогийн хэрэглэгчийн асуулт бол заавал хариулах үндсэн даалгавар. Өмнөх яриаг зөвхөн яг холбоотой follow-up үед л туслах контекст болгон ашигла.
+- Хэрэв одоогийн асуулт өмнөхөөс өөр салбар руу шилжсэн бол өмнөх хариултыг дуурайхгүй, одоогийн асуултад шинээр хариул.
+- Retrieval/context-ийн түүхий текстийг хэрэглэгчид бүү буулга. "Хууль: ... Зүйл: ..." гэх OCR/raw мөрүүдийг шууд хуулж болохгүй.
+- Хамааралгүй заалт гарч ирвэл бүрэн хас. Хуулийн нэр, зүйл дугаар дангаар нь хангалтгүй; заавал хэрэглэгчийн нөхцөлд яаж үйлчлэхийг энгийн монголоор тайлбарла.
+- Хариулт бүр хуульч хүн тайлбарлаж байгаа мэт ойлгомжтой, хэрэгжүүлэх алхамтай, давхардалгүй байна.
+- LLM эсвэл эх сурвалж сул байвал raw dump өгөхийн оронд баттай мэдэж буй практик алхам, тодруулах шаардлагатай зүйл, эрсдэлийг тайван тайлбарла.`;
+
 function buildSystemPrompt(mode: QueryMode): string {
   if (mode === 'article') {
     return `${BASE_SYSTEM_PROMPT}
@@ -396,7 +405,7 @@ export async function generate(
   const messages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
-      content: `${buildSystemPrompt(mode)}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}`,
+      content: `${buildSystemPrompt(mode)}\n\n${QUALITY_FIRST_SYSTEM_APPENDIX}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}`,
     },
     // Conversation history
     ...trimmedHistory.map(
@@ -408,7 +417,7 @@ export async function generate(
     // Current query with context
     {
       role: 'user',
-      content: `ГОЛ ЛАВЛАХ ЗААЛТУУД:\n${contextReferenceGuide}\n\nКОНТЕКСТ (эх сурвалжууд):\n\n${contextBlock}\n\n---\n\nХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}\nАСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}\nКОНТЕКСТ ЧАНАР: ${contextStrength}\nЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}\nАСУУЛТ: ${primaryQuery}`,
+      content: `ОДООГИЙН АСУУЛТАД ХАРИУЛ. Өмнөх яриа байгаа бол зөвхөн холбоотой үед туслах контекст гэж үз.\n\nГОЛ ЛАВЛАХ ЗААЛТУУД:\n${contextReferenceGuide}\n\nКОНТЕКСТ (эх сурвалжууд):\n\n${contextBlock}\n\n---\n\nХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}\nАСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}\nКОНТЕКСТ ЧАНАР: ${contextStrength}\nЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}\nОДООГИЙН АСУУЛТ: ${primaryQuery}`,
     },
   ];
 
@@ -559,8 +568,12 @@ function shouldForceDetailedQaAnswer(answer: string): boolean {
   const wordCount = cleaned ? cleaned.split(' ').length : 0;
   const sectionCount = (answer.match(/(?:^|\n)\s*(?:\d+\.|\*\*[^*]+\*\*)/g) ?? []).length;
   const hasPracticalTips = /Практик\s+зөвлөгөө/i.test(answer);
+  const hasInternalOrRawDump =
+    /(LLM\s+үйлчилгээ|Доорх\s+контекст|Контекстэд\s+давтагдсан|retrieval|source\s+score|Хууль:\s*[^.\n]{3,180}\s+Зүйл:|Зүйл:\s*\d+(?:\.\d+)?\s+[А-ЯӨҮЁ])/iu.test(
+      answer,
+    );
 
-  return wordCount < 180 || sectionCount < 3 || !hasPracticalTips;
+  return hasInternalOrRawDump || wordCount < 180 || sectionCount < 3 || !hasPracticalTips;
 }
 
 type QaReference = {
@@ -598,14 +611,11 @@ function ensureLegalLinksInAnswer(
 function cleanupAnswerStructure(answer: string): string {
   const lines = answer.split(/\r?\n/);
   const cleaned: string[] = [];
-  const orphanSectionLabels =
-    /^(?:Зөвлөгөө|Яг одоо хийх алхам|Хуулийн үндэслэл|Хуулийн тайлбар|Анхаарах эрсдэл|Практик зөвлөгөө)$/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const current = lines[i]?.trim() ?? '';
-    const next = lines[i + 1]?.trim() ?? '';
 
-    if (/^\d+$/.test(current) && orphanSectionLabels.test(next.replace(/\*\*/g, ''))) {
+    if (/^\d+$/.test(current)) {
       continue;
     }
 
@@ -614,6 +624,30 @@ function cleanupAnswerStructure(answer: string): string {
       current.replace(/\*\*/g, '') === 'Практик зөвлөгөө' &&
       cleaned[cleaned.length - 1].replace(/\*\*/g, '') === 'Практик зөвлөгөө'
     ) {
+      continue;
+    }
+
+    const normalizedCurrent = current
+      .replace(/^\d+\.\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const isDuplicateMeaningfulLine =
+      normalizedCurrent.length >= 32 &&
+      cleaned.some(
+        (line) =>
+          line
+            .trim()
+            .replace(/^\d+\.\s*/, '')
+            .replace(/\s+/g, ' ')
+            .toLowerCase() === normalizedCurrent,
+      );
+
+    if (isDuplicateMeaningfulLine) {
+      continue;
+    }
+
+    if (/^(?:Контекстэд давтагдсан|Контекст сул үед|retrieval|source score)/i.test(current)) {
       continue;
     }
 
@@ -717,11 +751,10 @@ function buildDetailedQaFallbackFromContext(
   const steps = buildQaActionSteps(intent, query).slice(0, 4);
   const risks = buildQaRiskGuidance(intent, query);
   const tips = buildQaPracticalTips(intent, query).slice(0, 4);
-  const articleLine =
+  const articleFocusLine =
     allowedArticles.length > 0
-      ? `Контекстэд давтагдсан зүйл, заалт: ${allowedArticles.map((a) => `${a} дугаар зүйл`).join(', ')}.`
-      : 'Контекстэд баталгаажсан зүйл, заалтын хүрээнд маргааны үндэслэлээ тодорхойлох нь зүйтэй.';
-
+      ? `Энэ хариултад голлон ${allowedArticles.map((a) => `${a} дугаар зүйл`).join(', ')}-ийн зохицуулалтыг бодит нөхцөлтэй холбож тайлбарлав.`
+      : '';
   const standardizedAnswer = [
     '**Зөвлөгөө**',
     buildQaOpeningAdvice(intent, query),
@@ -731,6 +764,7 @@ function buildDetailedQaFallbackFromContext(
     '',
     '**Хуулийн тайлбар**',
     buildQaLawExplanationIntro(intent, query),
+    ...(articleFocusLine ? ['', articleFocusLine] : []),
     '',
     evidenceLines,
     '',
@@ -742,25 +776,6 @@ function buildDetailedQaFallbackFromContext(
   ].join('\n');
 
   return { answer: standardizedAnswer, confidence: 0.68 };
-
-  const answer = [
-    'Асуулттай холбоотой зохицуулалтыг доорх байдлаар дэлгэрэнгүй нэгтгэв.',
-    '',
-    '1. Холбогдох хуулийн үндэслэл',
-    evidenceLines,
-    '',
-    '2. Эрхээ хэрэгжүүлэх дараалал',
-    ...steps.map((step, idx) => `${idx + 1}. ${step}`),
-    '',
-    '3. Анхаарах нөхцөл ба үр дагавар',
-    risks,
-    articleLine,
-    '',
-    '**Практик зөвлөгөө**',
-    ...tips.map((tip) => `- ${tip}`),
-  ].join('\n');
-
-  return { answer, confidence: 0.68 };
 }
 
 function buildTrafficIncidentFallback(
@@ -1230,15 +1245,46 @@ function collectQaReferences(query: string, chunks: ChromaQueryResult[]): QaRefe
 
     const abbrev = resolveQaLawAbbrev(title, lawId);
     const citation = articleNo ? `[${abbrev}-ийн §${articleNo}](${url})` : `[${title}](${url})`;
-    const excerpt = compactFallbackText(String(chunk.document ?? ''), 180);
-    const summary = articleTitle
-      ? `${title} — ${articleTitle}: ${excerpt}`
-      : `${title}: ${excerpt}`;
+    const cleanArticleTitle = cleanArticleTitleForUser(articleTitle);
+    const excerpt = cleanReferenceExcerptForUser(String(chunk.document ?? ''));
+    const sourceLabel = articleNo ? `${title} §${articleNo}` : title;
+    const summary = cleanArticleTitle
+      ? `${sourceLabel} — ${cleanArticleTitle}. ${excerpt}`
+      : `${sourceLabel}. ${excerpt}`;
 
     refs.push({ summary, citation });
   }
 
   return refs;
+}
+
+function cleanArticleTitleForUser(title: string): string {
+  const cleaned = title.replace(/\s+/g, ' ').trim();
+  if (
+    !cleaned ||
+    /^(?:хамаарахгүй|үйлчлэхгүй|нэгэн адил хамаарна|д заасан|д заасны дагуу|энэ хууль|хууль тогтоомж)$/iu.test(
+      cleaned,
+    )
+  ) {
+    return '';
+  }
+
+  return cleaned.length > 90 ? `${cleaned.slice(0, 87).trimEnd()}…` : cleaned;
+}
+
+function cleanReferenceExcerptForUser(text: string): string {
+  let cleaned = text.replace(/\s+/g, ' ').trim();
+  cleaned = cleaned
+    .replace(/^Хууль:\s*[^:]{0,220}?\s+Зүйл:\s*\d+(?:\.\d+)?\s*/iu, '')
+    .replace(/^\d+(?:\.\d+)?\s*(?:дүгээр|дугаар)\s+зүйл\.?\s*/iu, '')
+    .replace(/^[А-ЯӨҮЁ0-9 ,/()"'“”«».-]{8,160}\s+(?=\d+(?:\.\d+)?\s|[А-ЯӨҮЁ])/u, '')
+    .trim();
+
+  if (!cleaned || /^Хууль:/iu.test(cleaned)) {
+    return 'Энэ эх сурвалж тухайн асуудлын эрх, үүрэг, шаардлага гаргах үндэслэлийг тодруулахад ашиглагдана.';
+  }
+
+  return compactFallbackText(cleaned, 170);
 }
 
 function resolveQaLawAbbrev(title: string, lawId: string): string {
@@ -1833,7 +1879,13 @@ function buildModeFallbackFromContext(
   confidence: number;
 } {
   if (mode === 'qa') {
-    return buildMongolianFallbackFromContext(query, chunks);
+    const fallbackIntent = classifyLegalIntent(query);
+    return buildDetailedQaFallbackFromContext(
+      query,
+      chunks,
+      fallbackIntent !== 'unknown' ? fallbackIntent : inferIntentFromChunks(chunks),
+      allowedArticles,
+    );
   }
 
   if (chunks.length === 0) {
@@ -2233,47 +2285,6 @@ function parseConfidence(text: string): { answer: string; confidence: number } {
   return { answer: text, confidence: 0.5 };
 }
 
-function buildMongolianFallbackFromContext(
-  query: string,
-  chunks: ChromaQueryResult[],
-): {
-  answer: string;
-  confidence: number;
-} {
-  if (chunks.length === 0) {
-    return { answer: NO_INFO_RESPONSE, confidence: 0 };
-  }
-
-  const topChunks = chunks.slice(0, 3);
-  const requestedArticle = extractRequestedArticleNumber(query);
-  const lines = topChunks.map((chunk, idx) => {
-    const title = String(chunk.metadata.title ?? `Эх сурвалж ${idx + 1}`);
-    const alignedArticle = extractQueryAlignedArticleNumber(query, chunk);
-    const articleNo =
-      alignedArticle && (!requestedArticle || alignedArticle === requestedArticle)
-        ? ` (${alignedArticle}-р зүйл)`
-        : '';
-    const excerpt = compactFallbackText(chunk.document, 260);
-    return `${idx + 1}. ${title}${articleNo}: ${excerpt}`;
-  });
-
-  const urls = Array.from(
-    new Set(
-      topChunks.map((chunk) => String(chunk.metadata.url ?? '')).filter((url) => url.length > 0),
-    ),
-  );
-
-  const maxScore = Math.max(0, ...topChunks.map((chunk) => Number(chunk.score) || 0));
-  const confidence = Math.round(Math.max(0.35, Math.min(0.9, maxScore)) * 100) / 100;
-
-  let answer = `LLM үйлчилгээ түр боломжгүй байна. Доорх контекстээс олдсон гол мэдээлэл:\n\n${lines.join('\n')}`;
-  if (urls.length > 0) {
-    answer += `\n\nЭх сурвалж:\n${urls.join('\n')}`;
-  }
-
-  return { answer, confidence };
-}
-
 function compactFallbackText(text: string, maxLen: number): string {
   const cleaned = text.replace(/\s+/g, ' ').trim();
   if (cleaned.length <= maxLen) {
@@ -2618,7 +2629,7 @@ function buildIntentGuidanceFallback(
     '',
     '4. Эрсдэл, анхаарах нөхцөл',
     riskGuidance,
-    'Контекст сул үед дээрх заалтуудыг хамгийн сүүлийн найруулгаар нь давхар шалгаж хэрэгжүүлнэ.',
+    'Хуулийн заалт хэрэглэхдээ тухайн гэрээ, тушаал, акт, мэдэгдэл болон хугацааны баримттайгаа заавал тулгаж шалгана.',
     '',
     '**Практик зөвлөгөө**',
     ...practicalTips.map((tip) => `- ${tip}`),
