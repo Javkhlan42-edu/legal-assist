@@ -398,7 +398,23 @@ fi
 git fetch origin $GitRef
 git checkout $GitRef
 git pull --ff-only origin $GitRef
+existing_db_password=""
+existing_jwt_secret=""
+if [ -f .env ]; then
+  existing_db_password="`$(sed -n 's/^DB_PASSWORD=//p' .env | head -n1 || true)"
+  existing_jwt_secret="`$(sed -n 's/^JWT_SECRET=//p' .env | head -n1 || true)"
+fi
 cp /tmp/legal-assist-prod.env .env
+if [ -n "`$existing_db_password" ]; then
+  grep -v '^DB_PASSWORD=' .env > .env.tmp || true
+  printf 'DB_PASSWORD=%s\n' "`$existing_db_password" >> .env.tmp
+  mv .env.tmp .env
+fi
+if [ -n "`$existing_jwt_secret" ]; then
+  grep -v '^JWT_SECRET=' .env > .env.tmp || true
+  printf 'JWT_SECRET=%s\n' "`$existing_jwt_secret" >> .env.tmp
+  mv .env.tmp .env
+fi
 docker build -f docker/api.Dockerfile -t $apiImage .
 docker push $apiImage
 docker build -f docker/worker.Dockerfile -t $workerImage .
