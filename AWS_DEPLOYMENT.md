@@ -33,7 +33,7 @@ Do not commit real secrets to git.
 
 ## 2. One-Click AWS Deploy
 
-Run the `AWS Deploy` workflow manually from GitHub Actions.
+The `AWS Deploy` workflow runs automatically on pushes to `main`. It can also be started manually from GitHub Actions. While the rollout PR is open, pushes to `deploy/aws-ec2-ecr-https` also trigger the same workflow for verification.
 
 The workflow will:
 

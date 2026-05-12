@@ -1,6 +1,10 @@
 name: AWS Deploy
 
 on:
+  push:
+    branches:
+      - main
+      - deploy/aws-ec2-ecr-https
   workflow_dispatch:
     inputs:
       domain_name:
