@@ -30,7 +30,7 @@ env:
 jobs:
   deploy:
     name: Build, Push, Provision, Deploy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, legal-assist-deploy]
 
     steps:
       - uses: actions/checkout@v4

@@ -35,6 +35,8 @@ Do not commit real secrets to git.
 
 The `AWS Deploy` workflow runs automatically on pushes to `main`. It can also be started manually from GitHub Actions. While the rollout PR is open, pushes to `deploy/aws-ec2-ecr-https` also trigger the same workflow for verification.
 
+The workflow runs on the repository self-hosted runner labeled `legal-assist-deploy`, installed on the EC2 host. This avoids GitHub-hosted runner provisioning failures and keeps Docker/ECR deployment close to the production host.
+
 The workflow will:
 
 1. Create ECR repositories if missing.
