@@ -32,6 +32,60 @@ export type CuratedQueryScenario =
   | 'traffic_collision'
   | 'traffic_collision_hit_and_run';
 
+function classifyUnicodeLegalIntent(text: string): QueryIntent {
+  const query = normalize(text);
+
+  if (!query) {
+    return 'unknown';
+  }
+
+  if (/(сонгууль|санал\s*өг|сонгогч)/iu.test(query)) {
+    return 'election';
+  }
+
+  if (/(татвар|НӨАТ|НДШ|албан\s*татвар)/iu.test(query)) {
+    return 'tax';
+  }
+
+  if (/(нийгмийн\s*даатгал|тэтгэвэр|тэтгэмж|шимтгэл)/iu.test(query)) {
+    return 'socialInsurance';
+  }
+
+  if (/(ажлаас|хал(?:ах|сан|уулсан)?|ажил\s*олгогч|хөдөлмөр|цалин|амралт|сахилгын)/iu.test(query)) {
+    return 'labor';
+  }
+
+  if (/(гэр\s*бүл|салалт|гэрлэлт|хүүхэд|асрамж|тэтгэлэг|эцэг\s*эх)/iu.test(query)) {
+    return 'family';
+  }
+
+  if (/(дуу\s*чимээ|амгалан\s*тайван|шуугиан|хөрш|хажуу\s*(?:айл|байр))/iu.test(query)) {
+    return 'crime';
+  }
+
+  if (/(зөвшөөрөлгүй.{0,30}(?:зураг|нийтэл|тавь|пост)|(?:зураг|бичлэг).{0,30}зөвшөөрөлгүй|фэйсбүүк|facebook|сошиал|хувийн\s*мэдээлэл|хувийн\s*нууц)/iu.test(query)) {
+    return 'crime';
+  }
+
+  if (/(даатгал|даатгагч|нөхөн\s*төлбөр|каско|камер\s*бичлэг|буцаалт|доголдол|хэрэглэгч|онлайн\s*дэлгүүр|бараа|үйлчилгээ)/iu.test(query)) {
+    return 'contract';
+  }
+
+  if (/(эрүүгийн|гэмт\s*хэрэг|хулгай|залилан|луйвар|цахим\s*(?:луйвар|залилан)|авлига|хахууль|дээрэм|хүчирхийлэл|зод|цагдаа|нотлох\s*баримт)/iu.test(query)) {
+    return 'crime';
+  }
+
+  if (/(замын\s*хөдөлгөөн|зам\s*тээвэр|жолооч|машин|авто|осол|мөргөлд|шүргэ|согтуу(?:гаар)?|зогсоол)/iu.test(query)) {
+    return 'traffic';
+  }
+
+  if (/(банк|зээл|гэрээ|өр|алданги|нэмэгдүүлсэн\s*хүү|барьцаа|түрээс|хохирол)/iu.test(query)) {
+    return 'contract';
+  }
+
+  return 'unknown';
+}
+
 const BASE_INTENT_PREFERRED_LAW_IDS: Record<Exclude<QueryIntent, 'unknown'>, string[]> = {
   crime: ['12172', '12694', '9287', '12695', '12469', '523'],
   traffic: ['11224', '12695', '12172', '29'],
@@ -918,6 +972,11 @@ export function classifyLegalIntent(userQuery: string): QueryIntent {
   const queryTokens = tokenizeForIntent(userQuery);
   if (!query || queryTokens.length === 0) {
     return 'unknown';
+  }
+
+  const unicodeIntent = classifyUnicodeLegalIntent(userQuery);
+  if (unicodeIntent !== 'unknown') {
+    return unicodeIntent;
   }
 
   if (isSocialInsuranceQuery(query)) {

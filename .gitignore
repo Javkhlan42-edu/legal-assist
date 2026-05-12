@@ -31,6 +31,7 @@ logs/
 
 # Data / cache / local exports
 data/
+deploy-artifacts/
 db-documents-export.*
 temp-*.json
 test-*.json
