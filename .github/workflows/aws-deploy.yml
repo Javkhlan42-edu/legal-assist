@@ -158,6 +158,9 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${API_IMAGE%%/*}"
           docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
           docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
+          # Nginx resolves Docker service IPs at startup. Restart it after
+          # web/api updates so it does not keep a stale upstream IP.
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml restart nginx
           docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
 
       - name: Public health check
