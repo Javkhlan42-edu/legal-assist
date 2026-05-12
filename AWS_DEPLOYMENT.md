@@ -82,6 +82,12 @@ Health check:
 http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com/health
 ```
 
+While testing through the raw ALB URL, include that HTTP origin in `CORS_ORIGIN`; otherwise login/signup POST requests will be rejected by the API CORS guard. The SSH fallback script adds this automatically:
+
+```text
+CORS_ORIGIN=https://hop-on.dev,http://hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com
+```
+
 ## 4. Domain and HTTPS
 
 If the Route53 hosted zone for `hop-on.dev` is newly created, copy the hosted zone name servers from the workflow logs and set them at the domain registrar.
