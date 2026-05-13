@@ -291,6 +291,9 @@ Write-Host "Hosted zone NS: $nameServers"
 Write-Host "DNS alias status: $dnsAliasStatus"
 
 $envMap = Get-EnvMap '.env'
+if (-not $envMap.ContainsKey('OPENAI_API_KEY') -or [string]::IsNullOrWhiteSpace($envMap['OPENAI_API_KEY'])) {
+  throw 'OPENAI_API_KEY is missing from local .env. Production deploy would fall back to weak template generation.'
+}
 $chatModel = if ($envMap.ContainsKey('OPENAI_CHAT_MODEL')) { $envMap['OPENAI_CHAT_MODEL'] } else { 'gpt-5.4' }
 $embeddingModel = if ($envMap.ContainsKey('OPENAI_EMBEDDING_MODEL')) { $envMap['OPENAI_EMBEDDING_MODEL'] } else { 'text-embedding-3-small' }
 $prodEnv = @(
@@ -428,6 +431,7 @@ docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
 docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-retrieval-db.mjs
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-runtime-config.mjs
 docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
 "@
 $remoteScriptFile = Join-Path $env:TEMP 'legal-assist-remote-deploy.sh'

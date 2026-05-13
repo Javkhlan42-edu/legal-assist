@@ -26,8 +26,9 @@ Required secrets:
 - `AWS_REGION`
 - `AWS_ACCOUNT_ID`
 - `PRODUCTION_ENV`
+- `OPENAI_API_KEY` (fallback if `PRODUCTION_ENV` does not include `OPENAI_API_KEY`)
 
-`PRODUCTION_ENV` should contain the production `.env` values. Use `.env.aws.example` as the template.
+`PRODUCTION_ENV` should contain the production `.env` values. Use `.env.aws.example` as the template. The deploy workflow now refuses to continue if the runtime API container does not have a valid `OPENAI_API_KEY`, because otherwise production silently falls back to generic template answers instead of the high-quality LLM generation used locally.
 
 Do not commit real secrets to git.
 
@@ -44,7 +45,8 @@ The workflow will:
 3. Sync `PRODUCTION_ENV` into `/opt/legal-assist/.env` on the EC2 self-hosted runner.
 4. Pull and restart the new ECR images with Docker Compose.
 5. Apply the Postgre retrieval index migration from `apps/api/migrations/007_retrieval_postgres_indexes.sql`.
-6. Run a public HTTPS health check.
+6. Verify Postgre retrieval data and run `apps/api/scripts/check-runtime-config.mjs`, including an OpenAI chat smoke test.
+7. Run a public HTTPS health check.
 
 If GitHub Actions is unavailable or the self-hosted runner is offline, use the local SSH fallback below.
 
