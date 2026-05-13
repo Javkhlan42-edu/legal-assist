@@ -61,6 +61,7 @@ cat >"$COMMAND_FILE" <<JSON
     "aws ecr get-login-password --region '${AWS_REGION}' | docker login --username AWS --password-stdin '${API_IMAGE%%/*}'",
     "docker compose -f docker/docker-compose.ecr.yml pull",
     "docker compose -f docker/docker-compose.ecr.yml up -d --remove-orphans",
+    "docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node /app/scripts/apply-sql-migration.mjs /app/apps/api/migrations/007_retrieval_postgres_indexes.sql",
     "docker compose -f docker/docker-compose.ecr.yml ps"
   ]
 }

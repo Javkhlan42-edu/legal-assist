@@ -147,6 +147,20 @@ interface RetrievalRuntimeConfig {
   relatedLawCandidateLimit: number;
 }
 
+type TrafficIncidentSubtype =
+  | 'parking_hit_and_run'
+  | 'minor_collision'
+  | 'insurance_claim'
+  | 'dui_or_injury'
+  | 'general_traffic';
+
+type ContractSubtype =
+  | 'bank_loan_overdue'
+  | 'bank_loan_application'
+  | 'bank_loan_collateral'
+  | 'credit_information'
+  | 'generic_contract';
+
 const DOMAIN_PATTERNS: Record<Exclude<QueryIntent, 'unknown'>, RegExp[]> = {
   crime: [
     /эрүүгийн/i,
@@ -212,7 +226,7 @@ const CANONICAL_LAW_TITLE_PATTERNS: Record<Exclude<QueryIntent, 'unknown'>, RegE
     /гэрээ/i,
     /даатгалын\s+тухай/i,
     /жолоочийн\s+даатгалын\s+тухай/i,
-    /банк,\s*эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i,
+    /банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i,
     /банкны\s+тухай/i,
   ],
   tax: [/татвар/i],
@@ -575,31 +589,21 @@ export async function search(
   const fallbackStart = Date.now();
   fusedResults = applyFocusedFiltering(baseQuery, fusedResults);
   fusedResults = await augmentWithSignalKeywordFallback(baseQuery, intent, fusedResults);
+  fusedResults = await augmentWithBankLoanFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithCyberFraudFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithInsuranceClaimFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithConsumerRefundFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithLaborDismissalFallback(baseQuery, fusedResults);
   fusedResults = await augmentWithPublicNoiseFallback(baseQuery, fusedResults);
-  fusedResults = applyTopicSignalFiltering(baseQuery, fusedResults);
-  fusedResults = applyDomainFiltering(intent, fusedResults);
-  fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
-  fusedResults = applyInsuranceClaimFiltering(baseQuery, fusedResults);
-  fusedResults = applyConsumerRefundFiltering(baseQuery, fusedResults);
-  fusedResults = applyLaborDismissalFiltering(baseQuery, fusedResults);
-  fusedResults = applyPublicNoiseFiltering(baseQuery, fusedResults);
-  fusedResults = applyTrafficIncidentFiltering(baseQuery, fusedResults);
+  fusedResults = await augmentWithTrafficIncidentFallback(baseQuery, fusedResults);
   if (shouldPreferCanonicalOverview) {
     fusedResults = applyCanonicalLawFiltering(intent, fusedResults);
   }
   fusedResults = await augmentWithPreferredLawFallback(baseQuery, preferredLawIds, fusedResults);
   fusedResults = applyPreferredLawBoost(baseQuery, intent, mode, preferredLawIds, fusedResults);
   fusedResults = await augmentWithFocusedClauses(baseQuery, fusedResults);
-  fusedResults = await augmentWithCyberFraudFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithInsuranceClaimFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithConsumerRefundFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithLaborDismissalFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithPublicNoiseFallback(baseQuery, fusedResults);
   fusedResults = applyTopicSignalFiltering(baseQuery, fusedResults);
+  fusedResults = applyBankLoanFiltering(baseQuery, fusedResults);
   fusedResults = applyDomainFiltering(intent, fusedResults);
   fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
   fusedResults = applyInsuranceClaimFiltering(baseQuery, fusedResults);
@@ -715,10 +719,11 @@ export async function search(
 
   const buildStart = Date.now();
   const retrievedRelatedLaws = buildRelatedLaws(baseQuery, mode, relatedLawCandidates);
-  const relatedLaws =
-    retrievedRelatedLaws.length > 0
-      ? retrievedRelatedLaws
-      : buildIntentFallbackRelatedLaws(intent, baseQuery);
+  const relatedLaws = selectRelatedLawsWithFallback(
+    intent,
+    baseQuery,
+    retrievedRelatedLaws,
+  );
   const relatedCases = buildRelatedCases(baseQuery, caseIntent, relatedCaseResults);
   const sources = buildSources(baseQuery, mode, topChunks);
   const retrievalQuality = assessRetrievalQuality(intent, topChunks, relatedLaws);
@@ -860,11 +865,16 @@ async function augmentWithPreferredLawFallback(
   preferredLawIds: string[],
   results: ChromaQueryResult[],
 ): Promise<ChromaQueryResult[]> {
-  if (preferredLawIds.length === 0) {
+  const bankLoanQuery = isBankLoanQuery(query);
+  const effectivePreferredLawIds = bankLoanQuery
+    ? preferredLawIds.filter((lawId) => lawId === '299')
+    : preferredLawIds;
+
+  if (effectivePreferredLawIds.length === 0) {
     return results;
   }
 
-  const preferredSet = new Set(preferredLawIds);
+  const preferredSet = new Set(effectivePreferredLawIds);
   const preferredHits = results
     .slice(0, 8)
     .filter((result) => preferredSet.has(getResultLawId(result))).length;
@@ -922,12 +932,42 @@ async function augmentWithPreferredLawFallback(
        INNER JOIN documents d ON d.id = c.document_id
        WHERE d.source::text = 'legalinfo'
          AND d.source_id = ANY(string_to_array($3::text, ','))
+         AND (
+           $5::boolean = false
+           OR (
+             d.source_id = '299'
+             AND (
+               c.metadata->>'articleNo' LIKE '451%' OR
+               c.metadata->>'articleNo' LIKE '452%' OR
+               c.metadata->>'articleNo' LIKE '453%' OR
+               (c.metadata->>'articleNo' LIKE '222%' AND (
+                 c.text ILIKE '%хугацаа хэтр%' OR c.text ILIKE '%үүрэг%' OR c.text ILIKE '%төлбөр%'
+               ))
+             )
+           )
+         )
        ORDER BY score DESC, LENGTH(c.text) ASC, c.id ASC
        LIMIT $4`,
-      [query, anchor, preferredLawIds.join(','), 18],
+      [query, anchor, effectivePreferredLawIds.join(','), 18, bankLoanQuery],
     );
 
     if (rows.length === 0) {
+      return results;
+    }
+
+    const safeRows = bankLoanQuery
+      ? rows.filter((row) =>
+          isBankLoanRelevantResult(query, {
+            id: row.id,
+            document: row.document || '',
+            metadata: row.metadata || {},
+            score: Number(row.score) || 0,
+            rawScore: Number(row.score) || 0,
+          }),
+        )
+      : rows;
+
+    if (safeRows.length === 0) {
       return results;
     }
 
@@ -936,7 +976,7 @@ async function augmentWithPreferredLawFallback(
       merged.set(result.id, result);
     }
 
-    for (const row of rows) {
+    for (const row of safeRows) {
       const mapped: ChromaQueryResult = {
         id: row.id,
         document: row.document || '',
@@ -956,9 +996,150 @@ async function augmentWithPreferredLawFallback(
     console.warn(
       {
         error: error instanceof Error ? error.message : String(error),
-        preferredLawIds,
+        preferredLawIds: effectivePreferredLawIds,
       },
       'Preferred-law fallback retrieval failed',
+    );
+    return results;
+  }
+}
+
+function mergeFallbackRows(
+  results: ChromaQueryResult[],
+  rows: PreferredLawFallbackRow[],
+): ChromaQueryResult[] {
+  if (rows.length === 0) {
+    return results;
+  }
+
+  const merged = new Map<string, ChromaQueryResult>();
+  for (const result of results) {
+    merged.set(result.id, result);
+  }
+
+  for (const row of rows) {
+    const mapped: ChromaQueryResult = {
+      id: row.id,
+      document: row.document || '',
+      metadata: row.metadata || {},
+      score: Number(row.score) || 0,
+      rawScore: Number(row.score) || 0,
+    };
+
+    const existing = merged.get(mapped.id);
+    if (!existing || mapped.score > existing.score) {
+      merged.set(mapped.id, mapped);
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.score - a.score);
+}
+
+async function augmentWithTrafficIncidentFallback(
+  query: string,
+  results: ChromaQueryResult[],
+): Promise<ChromaQueryResult[]> {
+  if (!isTrafficIncidentQuestion(query)) {
+    return results;
+  }
+
+  const relevantHits = results
+    .slice(0, 12)
+    .filter((result) => isTrafficIncidentRelevantResult(result));
+  const hasCoreTrafficLaw = relevantHits.some((result) => {
+    const lawId = getResultLawId(result);
+    const articleNo = normalizeArticleNo(String(result.metadata.articleNo ?? ''));
+    return (
+      (lawId === '12695' && /^14\.?7/.test(articleNo)) ||
+      lawId === '11224' ||
+      (lawId === '299' && /^497/.test(articleNo))
+    );
+  });
+
+  if (hasCoreTrafficLaw && relevantHits.length >= 3) {
+    return results;
+  }
+
+  const includeInsurance = /даатгал|нөхөн\s*төлбөр|каско/i.test(normalizeText(query));
+
+  try {
+    const rows = await dbQuery<PreferredLawFallbackRow>(
+      `SELECT
+         c.id,
+         SUBSTRING(c.text, 1, 2400) AS document,
+         c.metadata || jsonb_build_object(
+           'title', COALESCE(NULLIF(c.metadata->>'title', ''), d.title),
+           'source', COALESCE(NULLIF(c.metadata->>'source', ''), d.source::text),
+           'sourceId', COALESCE(NULLIF(c.metadata->>'sourceId', ''), d.source_id),
+           'lawId', COALESCE(NULLIF(c.metadata->>'lawId', ''), d.source_id),
+           'url', COALESCE(NULLIF(c.metadata->>'url', ''), d.url)
+         ) AS metadata,
+         CASE
+           WHEN d.source_id = '12695' AND (
+             c.metadata->>'articleNo' LIKE '14.7%' OR
+             c.text ILIKE '%14.7%' OR
+             c.text ILIKE '%замын хөдөлгөөний дүрэм%'
+           ) THEN 0.93
+           WHEN d.source_id = '11224' AND c.text ILIKE '%жолооч%' AND (
+             c.text ILIKE '%үүрэг%' OR c.text ILIKE '%осол%' OR c.text ILIKE '%замын хөдөлгөөн%'
+           ) THEN 0.88
+           WHEN d.source_id = '299' AND (
+             c.metadata->>'articleNo' LIKE '497%' OR
+             c.text ILIKE '%гэм хор%' OR
+             c.text ILIKE '%эд хөрөнгөд хохирол%' OR
+             c.text ILIKE '%хохирол нөхөн%'
+           ) THEN 0.84
+           WHEN $1::boolean AND (
+             d.title ILIKE '%ЖОЛООЧИЙН ДААТГАЛ%' OR d.title ILIKE '%ДААТГАЛЫН%'
+           ) AND (
+             c.text ILIKE '%нөхөн төлбөр%' OR c.text ILIKE '%даатгалын тохиолдол%'
+           ) THEN 0.80
+           ELSE 0.0
+         END AS score
+       FROM chunks c
+       INNER JOIN documents d ON d.id = c.document_id
+       WHERE d.source::text = 'legalinfo'
+         AND (
+           (d.source_id = '12695' AND (
+             c.metadata->>'articleNo' LIKE '14.7%' OR
+             c.text ILIKE '%14.7%' OR
+             c.text ILIKE '%замын хөдөлгөөний дүрэм%'
+           ))
+           OR (d.source_id = '11224' AND c.text ILIKE '%жолооч%' AND (
+             c.text ILIKE '%үүрэг%' OR c.text ILIKE '%осол%' OR c.text ILIKE '%замын хөдөлгөөн%'
+           ))
+           OR (d.source_id = '299' AND (
+             c.metadata->>'articleNo' LIKE '497%' OR
+             c.text ILIKE '%гэм хор%' OR
+             c.text ILIKE '%эд хөрөнгөд хохирол%' OR
+             c.text ILIKE '%хохирол нөхөн%'
+           ))
+           OR ($1::boolean AND (
+             d.title ILIKE '%ЖОЛООЧИЙН ДААТГАЛ%' OR d.title ILIKE '%ДААТГАЛЫН%'
+           ) AND (
+             c.text ILIKE '%нөхөн төлбөр%' OR c.text ILIKE '%даатгалын тохиолдол%'
+           ))
+         )
+       ORDER BY score DESC, LENGTH(c.text) ASC, c.id ASC
+       LIMIT 16`,
+      [includeInsurance],
+    );
+
+    const validRows = rows.filter((row) =>
+      isTrafficIncidentRelevantResult({
+        id: row.id,
+        document: row.document || '',
+        metadata: row.metadata || {},
+        score: Number(row.score) || 0,
+        rawScore: Number(row.score) || 0,
+      }),
+    );
+
+    return mergeFallbackRows(results, validRows);
+  } catch (error) {
+    console.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'Traffic incident fallback retrieval failed',
     );
     return results;
   }
@@ -1763,6 +1944,314 @@ function countRegexMatches(text: string, patterns: RegExp[]): number {
   return count;
 }
 
+const BANK_LOAN_QUERY_PATTERN =
+  /(?:банк|банкны|банкнаас).{0,50}зээл|зээл.{0,50}(?:банк|банкны|банкнаас)|зээлийн\s+гэрээ/i;
+const BANK_LOAN_OVERDUE_PATTERN =
+  /(?:төлөөгүй|төлсөнгүй|төлж\s+чадаагүй|барагдуулаагүй|хугацаа\s+хэтэр|хоцор|алданги|нэмэгдүүлсэн\s+хүү|торгууль|3\s*сар|2-?3\s*сар|өр)/i;
+const BANK_LOAN_APPLICATION_PATTERN =
+  /(?:авах|авахдаа|олгуулах|анхаарах|шалгах|гэрээ\s+байгуулах|нөхцөл|хүү|шимтгэл)/i;
+const BANK_LOAN_COLLATERAL_PATTERN = /(?:барьцаа|ипотек|үл\s+хөдлөх|хөдлөх\s+эд\s+хөрөнгө|батлан\s+даагч)/i;
+const BANK_LOAN_CREDIT_INFO_PATTERN =
+  /(?:зээлийн\s+мэдээлэл|хар\s+жагсаалт|сөрөг\s+түүх|зээлийн\s+түүх|лавлагаа|мэдээллийн\s+сан)/i;
+
+const BANK_LOAN_ALLOWED_TITLE_PATTERNS: RegExp[] = [
+  /иргэний\s+хууль/i,
+  /банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i,
+  /банкны\s+тухай/i,
+  /зээлийн\s+мэдээллийн\s+тухай/i,
+  /үл\s+хөдлөх.*барьцаа/i,
+  /хөдлөх.*барьцаа/i,
+  /барьцааны\s+тухай/i,
+];
+
+const BANK_LOAN_CORE_TEXT_PATTERNS: RegExp[] = [
+  /банк|банкны|банкнаас/i,
+  /зээл|зээлийн\s+гэрээ|зээлийн\s+үйл\s+ажиллагаа/i,
+  /зээлийн\s+хүү|нэмэгдүүлсэн\s+хүү|хугацаа\s+хэтр/i,
+  /үүрэг|төлбөр|үлдэгдэл|барагдуулах/i,
+  /барьцаа|батлан\s+даалт|батлан\s+даагч/i,
+  /зээлийн\s+мэдээлэл|зээлийн\s+түүх/i,
+];
+
+const BANK_LOAN_EXCLUDED_TITLE_PATTERNS: RegExp[] = [
+  /даатгалын\s+тухай/i,
+  /жолоочийн\s+даатгал/i,
+  /хадгаламжийн\s+даатгал/i,
+  /малын\s+индексжүүлсэн\s+даатгал/i,
+  /хөрөнгө\s+оруулалтын\s+төрөлжсөн\s+банк/i,
+  /дагаж\s+мөрдөх|хүчингүй\s+болсон|хүчингүйд\s+тооцох/i,
+  /франчайз/i,
+  /өв|гэр\s+бүлийн|сонгуулийн|татвар|хөдөлмөр|эрүүгийн|зөрчлийн/i,
+];
+
+const BANK_LOAN_NOISY_TEXT_PATTERN =
+  /(?:хамаарахгүй|нэгэн\s+адил\s+хамаарна|д\s+заасан\s+журмаар\s+тоолно|өв\s+нээгдэнэ|франчайзийн\s+гэрээ)/i;
+
+function resolveContractSubtype(query: string): ContractSubtype {
+  const normalized = normalizeText(query);
+
+  if (!BANK_LOAN_QUERY_PATTERN.test(normalized)) {
+    return 'generic_contract';
+  }
+
+  if (BANK_LOAN_CREDIT_INFO_PATTERN.test(normalized)) {
+    return 'credit_information';
+  }
+
+  if (BANK_LOAN_COLLATERAL_PATTERN.test(normalized)) {
+    return 'bank_loan_collateral';
+  }
+
+  if (BANK_LOAN_OVERDUE_PATTERN.test(normalized)) {
+    return 'bank_loan_overdue';
+  }
+
+  if (BANK_LOAN_APPLICATION_PATTERN.test(normalized)) {
+    return 'bank_loan_application';
+  }
+
+  return 'bank_loan_overdue';
+}
+
+function isBankLoanQuery(query: string): boolean {
+  return resolveContractSubtype(query) !== 'generic_contract';
+}
+
+function hasBankLoanCoreLaw(result: ChromaQueryResult): boolean {
+  const title = normalizeText(getMetaTitle(result.metadata));
+  const lawId = getResultLawId(result);
+  const articleNo = normalizeArticleNo(String(result.metadata.articleNo ?? ''));
+
+  return (
+    (lawId === '299' && /^(451|452|453)(?:\.|$)?/.test(articleNo)) ||
+    (/иргэний\s+хууль/i.test(title) && /^(451|452|453)(?:\.|$)?/.test(articleNo)) ||
+    /банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i.test(title)
+  );
+}
+
+function isBankLoanRelevantResult(query: string, result: ChromaQueryResult): boolean {
+  const subtype = resolveContractSubtype(query);
+  if (subtype === 'generic_contract') {
+    return true;
+  }
+
+  const title = normalizeText(getMetaTitle(result.metadata));
+  const articleTitle = normalizeText(
+    String(result.metadata.articleTitle ?? result.metadata.sectionTitle ?? ''),
+  );
+  const lawId = getResultLawId(result);
+  const articleNo = normalizeArticleNo(String(result.metadata.articleNo ?? ''));
+  const corpus = normalizeText(
+    `${title} ${articleTitle} ${articleNo} ${String(result.document ?? '').slice(0, 2200)}`,
+  );
+
+  if (BANK_LOAN_EXCLUDED_TITLE_PATTERNS.some((pattern) => pattern.test(title))) {
+    return false;
+  }
+
+  if (BANK_LOAN_NOISY_TEXT_PATTERN.test(corpus)) {
+    return false;
+  }
+
+  if (!BANK_LOAN_ALLOWED_TITLE_PATTERNS.some((pattern) => pattern.test(title))) {
+    return false;
+  }
+
+  if (lawId === '299' || /иргэний\s+хууль/i.test(title)) {
+    if (/^(451|452|453)(?:\.|$)?/.test(articleNo)) {
+      return true;
+    }
+
+    if (/^(222|225)(?:\.|$)?/.test(articleNo)) {
+      return /(зээл|банк|үүрэг|хугацаа\s+хэтр|төлбөр|нэмэгдүүлсэн\s+хүү)/i.test(corpus);
+    }
+
+    return false;
+  }
+
+  if (/банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i.test(title)) {
+    return /(зээлийн\s+гэрээ|зээлийн\s+хүү|зээлийн\s+хувийн\s+хэрэг|зээлийн\s+үйл\s+ажиллагаа|зээл\s+олгох|хугацаа\s+хэтр)/i.test(
+      corpus,
+    );
+  }
+
+  if (/банкны\s+тухай/i.test(title)) {
+    return (
+      subtype === 'bank_loan_application' &&
+      /(банк(?:ны)?\s+эрхлэх\s+үйл\s+ажиллагаа|зээл\s+олгох|зээлийн\s+үйл\s+ажиллагаа)/i.test(
+        corpus,
+      )
+    );
+  }
+
+  if (/зээлийн\s+мэдээллийн\s+тухай/i.test(title)) {
+    return subtype === 'credit_information' || BANK_LOAN_CREDIT_INFO_PATTERN.test(corpus);
+  }
+
+  if (/барьцаа/i.test(title)) {
+    return subtype === 'bank_loan_collateral' || BANK_LOAN_COLLATERAL_PATTERN.test(corpus);
+  }
+
+  return countRegexMatches(corpus, BANK_LOAN_CORE_TEXT_PATTERNS) >= 3;
+}
+
+function getBankLoanBoost(query: string, result: ChromaQueryResult): number {
+  if (!isBankLoanQuery(query)) {
+    return 0;
+  }
+
+  const title = normalizeText(getMetaTitle(result.metadata));
+  const articleNo = normalizeArticleNo(String(result.metadata.articleNo ?? ''));
+  const corpus = normalizeText(`${title} ${String(result.document ?? '').slice(0, 1600)}`);
+
+  if (/иргэний\s+хууль/i.test(title) && /^452(?:\.|$)?/.test(articleNo)) {
+    return 0.26;
+  }
+
+  if (/иргэний\s+хууль/i.test(title) && /^451(?:\.|$)?/.test(articleNo)) {
+    return 0.24;
+  }
+
+  if (/иргэний\s+хууль/i.test(title) && /^453(?:\.|$)?/.test(articleNo)) {
+    return 0.2;
+  }
+
+  if (/банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i.test(title)) {
+    return 0.2;
+  }
+
+  if (/зээлийн\s+мэдээллийн\s+тухай|барьцаа/i.test(title)) {
+    return 0.12;
+  }
+
+  if (/(зээлийн\s+гэрээ|зээлийн\s+хүү|нэмэгдүүлсэн\s+хүү|хугацаа\s+хэтр)/i.test(corpus)) {
+    return 0.08;
+  }
+
+  return 0.04;
+}
+
+function applyBankLoanFiltering(
+  query: string,
+  results: ChromaQueryResult[],
+): ChromaQueryResult[] {
+  if (!isBankLoanQuery(query) || results.length === 0) {
+    return results;
+  }
+
+  const filtered = results
+    .filter((result) => isBankLoanRelevantResult(query, result))
+    .map((result) => ({
+      ...result,
+      score: Math.min(1, result.score + getBankLoanBoost(query, result)),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  return filtered;
+}
+
+async function augmentWithBankLoanFallback(
+  query: string,
+  results: ChromaQueryResult[],
+): Promise<ChromaQueryResult[]> {
+  const subtype = resolveContractSubtype(query);
+  if (subtype === 'generic_contract') {
+    return results;
+  }
+
+  const relevantHits = results
+    .slice(0, 12)
+    .filter((result) => isBankLoanRelevantResult(query, result));
+
+  if (relevantHits.length >= 3 && relevantHits.some((result) => hasBankLoanCoreLaw(result))) {
+    return results;
+  }
+
+  const includeCollateral = subtype === 'bank_loan_collateral';
+  const includeCreditInfo = subtype === 'credit_information';
+  const includeApplication = subtype === 'bank_loan_application';
+
+  try {
+    const rows = await dbQuery<PreferredLawFallbackRow>(
+      `SELECT
+         c.id,
+         SUBSTRING(c.text, 1, 2400) AS document,
+         c.metadata || jsonb_build_object(
+           'title', COALESCE(NULLIF(c.metadata->>'title', ''), d.title),
+           'documentTitle', COALESCE(NULLIF(c.metadata->>'documentTitle', ''), d.title),
+           'source', COALESCE(NULLIF(c.metadata->>'source', ''), d.source::text),
+           'sourceId', COALESCE(NULLIF(c.metadata->>'sourceId', ''), d.source_id),
+           'lawId', COALESCE(NULLIF(c.metadata->>'lawId', ''), d.source_id),
+           'url', COALESCE(NULLIF(c.metadata->>'url', ''), NULLIF(c.metadata->>'documentUrl', ''), d.url),
+           'documentUrl', COALESCE(NULLIF(c.metadata->>'documentUrl', ''), d.url)
+         ) AS metadata,
+         CASE
+           WHEN d.source_id = '299' AND c.metadata->>'articleNo' LIKE '452%' THEN 0.96
+           WHEN d.source_id = '299' AND c.metadata->>'articleNo' LIKE '451%' THEN 0.94
+           WHEN d.source_id = '299' AND c.metadata->>'articleNo' LIKE '453%' THEN 0.88
+           WHEN d.source_id = '299' AND c.metadata->>'articleNo' LIKE '222%' THEN 0.76
+           WHEN d.source_id = '16230554816671' AND (
+             c.text ILIKE '%зээлийн гэрээ%' OR
+             c.text ILIKE '%зээлийн хүү%' OR
+             c.text ILIKE '%зээлийн хувийн хэрэг%' OR
+             c.text ILIKE '%зээлийн үйл ажиллагаа%'
+           ) THEN 0.9
+           WHEN $1::boolean AND d.title ILIKE '%БАРЬЦАА%' THEN 0.78
+           WHEN $2::boolean AND d.title ILIKE '%ЗЭЭЛИЙН МЭДЭЭЛЛИЙН%' THEN 0.78
+           WHEN $3::boolean AND d.title ILIKE '%БАНКНЫ ТУХАЙ%' AND c.text ILIKE '%зээл%' THEN 0.7
+           ELSE 0.0
+         END AS score
+       FROM chunks c
+       INNER JOIN documents d ON d.id = c.document_id
+       WHERE d.source::text = 'legalinfo'
+         AND (
+           (d.source_id = '299' AND (
+             c.metadata->>'articleNo' LIKE '451%' OR
+             c.metadata->>'articleNo' LIKE '452%' OR
+             c.metadata->>'articleNo' LIKE '453%' OR
+             (c.metadata->>'articleNo' LIKE '222%' AND (
+               c.text ILIKE '%хугацаа хэтр%' OR c.text ILIKE '%үүрэг%' OR c.text ILIKE '%төлбөр%'
+             ))
+           ))
+           OR (d.source_id = '16230554816671' AND (
+             c.text ILIKE '%зээлийн гэрээ%' OR
+             c.text ILIKE '%зээлийн хүү%' OR
+             c.text ILIKE '%зээлийн хувийн хэрэг%' OR
+             c.text ILIKE '%зээлийн үйл ажиллагаа%'
+           ))
+           OR ($1::boolean AND d.title ILIKE '%БАРЬЦАА%' AND (
+             c.text ILIKE '%барьцаа%' OR c.text ILIKE '%барьцааны эрх%'
+           ))
+           OR ($2::boolean AND d.title ILIKE '%ЗЭЭЛИЙН МЭДЭЭЛЛИЙН%' AND (
+             c.text ILIKE '%зээлийн мэдээлэл%' OR c.text ILIKE '%зээлийн түүх%'
+           ))
+           OR ($3::boolean AND d.title ILIKE '%БАНКНЫ ТУХАЙ%' AND c.text ILIKE '%зээл%')
+         )
+       ORDER BY score DESC, LENGTH(c.text) ASC, c.id ASC
+       LIMIT 18`,
+      [includeCollateral, includeCreditInfo, includeApplication],
+    );
+
+    const validRows = rows.filter((row) =>
+      isBankLoanRelevantResult(query, {
+        id: row.id,
+        document: row.document || '',
+        metadata: row.metadata || {},
+        score: Number(row.score) || 0,
+        rawScore: Number(row.score) || 0,
+      }),
+    );
+
+    return mergeFallbackRows(results, validRows);
+  } catch (error) {
+    console.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      'Bank loan fallback retrieval failed',
+    );
+    return results;
+  }
+}
+
 const INSURANCE_CLAIM_LAW_TITLE_PATTERNS: RegExp[] = [
   /даатгалын\s+тухай/i,
   /жолоочийн\s+даатгалын\s+тухай/i,
@@ -1988,8 +2477,68 @@ function isTrafficIncidentQuestion(query: string): boolean {
     return false;
   }
 
-  return /зам\s+тээврийн\s+осол|осол\s+гар|мөргөл|мөргө|шүргэ|машинтай\s+мөргөлд|согтуу.*жолоод|ослын\s+газар|зугт/i.test(
+  const normalized = normalizeText(query);
+  return (
+    /зам\s+тээврийн\s+осол|осол\s+гар|мөргөл|мөргө|шүргэ|машинтай\s+мөргөлд|согтуу.*жолоод|ослын\s+газар|зугт/i.test(
+      normalized,
+    ) ||
+    /(зогсоол|паркинг).{0,80}(мөргө|шүргэ|зугт|осол|хохирол|машин)|(?:мөргө|шүргэ|зугт|осол).{0,80}(зогсоол|паркинг)/i.test(
+      normalized,
+    )
+  );
+}
+
+function resolveTrafficIncidentSubtype(query: string): TrafficIncidentSubtype {
+  const normalized = normalizeText(query);
+
+  if (isTrafficInsuranceClaimQuery(normalized)) {
+    return 'insurance_claim';
+  }
+
+  if (/(согтуу|согтуур|мансуур|гэмтэл|бэртэл|нас\s*бар|амь\s*нас|эрүүгийн|ял|шийтгэл)/i.test(normalized)) {
+    return 'dui_or_injury';
+  }
+
+  if (/(зогсоол|паркинг).{0,80}(мөргө|шүргэ|зугт)|(?:мөргө|шүргэ).{0,80}(зогсоол|паркинг).{0,80}зугт|зугт.{0,80}(зогсоол|паркинг)/i.test(normalized)) {
+    return 'parking_hit_and_run';
+  }
+
+  if (/(мөргө|мөргөлд|шүргэ|осол)/i.test(normalized)) {
+    return 'minor_collision';
+  }
+
+  return 'general_traffic';
+}
+
+function isExplicitRelatedCaseAsk(query: string): boolean {
+  return /(ижил\s+кейс|төстэй\s+кейс|шүүхийн\s+кейс|шүүхийн\s+шийдвэр|шүүхийн\s+практик|шийтгэх\s+тогтоол|магадлал|ямар\s+ял|ял\s+авах|хэргийн\s+жишээ)/i.test(
     normalizeText(query),
+  );
+}
+
+function isTrafficPracticalAdviceQuery(query: string): boolean {
+  return /(яах|яаж|ямар\s+арга|арга\s+хэмжээ|шийдвэрлэх|авах\s+вэ|одоо|хэрхэн|зөвлөгөө)/i.test(
+    normalizeText(query),
+  );
+}
+
+function isSeriousTrafficCaseQuery(query: string): boolean {
+  return /(согтуу|согтуур|мансуур|гэмтэл|бэртэл|нас\s*бар|амь\s*нас|эрүүгийн|гэмт\s*хэрэг|ял|шийтгэл)/i.test(
+    normalizeText(query),
+  );
+}
+
+function shouldUseCompactTrafficRetrieval(
+  query: string,
+  intent: QueryIntent,
+  mode: QueryMode,
+): boolean {
+  return (
+    mode === 'qa' &&
+    intent === 'traffic' &&
+    isTrafficIncidentQuestion(query) &&
+    isTrafficPracticalAdviceQuery(query) &&
+    !isExplicitRelatedCaseAsk(query)
   );
 }
 
@@ -1999,6 +2548,11 @@ const TRAFFIC_INCIDENT_EXCLUDED_PATTERNS: RegExp[] = [
   /техникийн\s+үйлчилгээ|засвар\s+хийх/i,
   /улсын\s+бүртгэлийн\s+дугаар/i,
   /шүүрт\s+худгийн\s+таг|зам\s+дээр\s+хийгдсэн\s+үзлэг/i,
+  /авто\s+зам,\s*замын\s+байгууламж|авто\s+зам\s+замын\s+байгууламж/i,
+  /орц\s+гарц|зогсоолын\s+талбай|хурд\s+сааруулагч/i,
+  /чиглэлийн\s+тээврийн\s+хэрэгслийн\s+чиглэл|замналын\s+зогсоол/i,
+  /замын\s+байгууламж|тэмдэг,\s*тэмдэглэл|тэмдэглэл(?:ийг)?\s+гэмтээх/i,
+  /тээвэрлэгчийн\s+эрх,\s*үүрэг/i,
 ];
 
 const TRAFFIC_INCIDENT_SIGNAL_PATTERNS: RegExp[] = [
@@ -2009,17 +2563,50 @@ const TRAFFIC_INCIDENT_SIGNAL_PATTERNS: RegExp[] = [
   /зөрчил|эрүүгийн|гэмтэл|согтуур/i,
 ];
 
+function normalizeArticleNo(articleNo: string): string {
+  return articleNo.trim().replace(/\s+/g, '').replace(/^§/, '');
+}
+
+function isTrafficZurchilCoreArticle(articleNo: string, corpus: string): boolean {
+  const normalizedArticleNo = normalizeArticleNo(articleNo);
+
+  if (/^14\.?7(?:\.|$)?/.test(normalizedArticleNo)) {
+    return true;
+  }
+
+  if (/^(5|6)(?:\.|$)/.test(normalizedArticleNo)) {
+    return false;
+  }
+
+  return /(14\.7|замын\s+хөдөлгөөний\s+дүрэм|ослын\s+газар|зугт|жолоодох\s+эрх|тээврийн\s+хэрэгсэл\s+жолоод)/i.test(
+    corpus,
+  );
+}
+
 function isTrafficIncidentRelevantResult(result: ChromaQueryResult): boolean {
   const title = getMetaTitle(result.metadata);
   const articleNo = String(result.metadata.articleNo ?? '');
+  const lawId = getResultLawId(result);
   const corpus = normalizeText(`${title} ${articleNo} ${result.document?.slice(0, 1800) ?? ''}`);
 
   if (TRAFFIC_INCIDENT_EXCLUDED_PATTERNS.some((pattern) => pattern.test(corpus))) {
     return false;
   }
 
-  if (/зөрчлийн\s+тухай|эрүүгийн\s+хууль|иргэний\s+хууль|жолоочийн\s+даатгал/i.test(title)) {
-    return countRegexMatches(corpus, TRAFFIC_INCIDENT_SIGNAL_PATTERNS) >= 1;
+  if (/зөрчлийн\s+тухай/i.test(title) || lawId === '12695') {
+    return isTrafficZurchilCoreArticle(articleNo, corpus);
+  }
+
+  if (/иргэний\s+хууль/i.test(title) || lawId === '299') {
+    return /^497(?:\.|$)?/.test(normalizeArticleNo(articleNo)) || /(гэм\s+хор|эд\s+хөрөнгөд\s+хохирол|хохирол\s+нөхөн)/i.test(corpus);
+  }
+
+  if (/эрүүгийн\s+хууль/i.test(title) || lawId === '12172') {
+    return /^27\.?10/.test(normalizeArticleNo(articleNo)) || /(тээврийн\s+хэрэгслийн\s+хөдөлгөөний\s+аюулгүй|согтуу|гэмтэл|нас\s*бар)/i.test(corpus);
+  }
+
+  if (/жолоочийн\s+даатгал|даатгалын\s+тухай/i.test(title)) {
+    return /(нөхөн\s+төлбөр|даатгалын\s+тохиолдол|хохирол)/i.test(corpus);
   }
 
   if (/замын\s+хөдөлгөөний\s+аюулгүй/i.test(title)) {
@@ -2214,6 +2801,8 @@ function getRetrievalRuntimeConfig(
 ): RetrievalRuntimeConfig {
   const speedMode = env.RETRIEVAL_SPEED_MODE ?? 'balanced';
   const retrieveRelatedCases = shouldRetrieveRelatedCasesForQuery(env, query, intent, mode);
+  const compactTrafficRetrieval = shouldUseCompactTrafficRetrieval(query, intent, mode);
+  const compactBankLoanRetrieval = isBankLoanQuery(query) && mode === 'qa';
   const useVectorSearch =
     !(
       speedMode === 'fast' &&
@@ -2223,6 +2812,23 @@ function getRetrievalRuntimeConfig(
     );
 
   if (speedMode === 'quality') {
+    if (compactTrafficRetrieval || compactBankLoanRetrieval) {
+      return {
+        speedMode,
+        useVectorSearch: true,
+        maxQueryVariants: 4,
+        vectorTopK: compactBankLoanRetrieval ? (isSingleWord ? 28 : shortQuery ? 22 : 16) : isSingleWord ? 24 : shortQuery ? 20 : 14,
+        keywordTopK: compactBankLoanRetrieval ? (isSingleWord ? 30 : shortQuery ? 26 : 24) : isSingleWord ? 28 : shortQuery ? 24 : 22,
+        keywordFallbackTopK: 30,
+        caseVectorTopK: 0,
+        caseKeywordTopK: 0,
+        retrieveRelatedCases: false,
+        rerankCandidateLimit: 12,
+        finalTopResults: 6,
+        relatedLawCandidateLimit: 22,
+      };
+    }
+
     return {
       speedMode,
       useVectorSearch: true,
@@ -2259,16 +2865,24 @@ function getRetrievalRuntimeConfig(
   return {
     speedMode,
     useVectorSearch,
-    maxQueryVariants: isCyberFraudQuery(query) ? 4 : 6,
-    vectorTopK: isSingleWord ? 36 : shortQuery ? 24 : 14,
-    keywordTopK: isSingleWord ? 32 : shortQuery ? 26 : 24,
-    keywordFallbackTopK: 34,
+    maxQueryVariants: compactTrafficRetrieval || compactBankLoanRetrieval ? 4 : isCyberFraudQuery(query) ? 4 : 6,
+    vectorTopK: compactTrafficRetrieval
+      ? (isSingleWord ? 24 : shortQuery ? 20 : 14)
+      : compactBankLoanRetrieval
+        ? (isSingleWord ? 28 : shortQuery ? 22 : 16)
+        : isSingleWord ? 36 : shortQuery ? 24 : 14,
+    keywordTopK: compactTrafficRetrieval
+      ? (isSingleWord ? 28 : shortQuery ? 24 : 22)
+      : compactBankLoanRetrieval
+        ? (isSingleWord ? 30 : shortQuery ? 26 : 24)
+        : isSingleWord ? 32 : shortQuery ? 26 : 24,
+    keywordFallbackTopK: compactTrafficRetrieval || compactBankLoanRetrieval ? 30 : 34,
     caseVectorTopK: retrieveRelatedCases ? 12 : 0,
     caseKeywordTopK: retrieveRelatedCases ? 14 : 0,
     retrieveRelatedCases,
-    rerankCandidateLimit: 14,
+    rerankCandidateLimit: compactTrafficRetrieval || compactBankLoanRetrieval ? 12 : 14,
     finalTopResults: 6,
-    relatedLawCandidateLimit: 24,
+    relatedLawCandidateLimit: compactTrafficRetrieval || compactBankLoanRetrieval ? 22 : 24,
   };
 }
 
@@ -2292,10 +2906,7 @@ function shouldRetrieveRelatedCasesForQuery(
 
   const speedMode = env.RETRIEVAL_SPEED_MODE ?? 'balanced';
   const normalized = normalizeText(query);
-  const explicitCaseAsk =
-    /(ижил\s+кейс|төстэй\s+кейс|шүүхийн\s+шийдвэр|шүүхийн\s+практик|шийтгэх\s+тогтоол|магадлал|ямар\s+ял|ял\s+авах|хэргийн\s+жишээ)/i.test(
-      normalized,
-    );
+  const explicitCaseAsk = isExplicitRelatedCaseAsk(normalized);
 
   if (explicitCaseAsk) {
     return true;
@@ -2310,7 +2921,7 @@ function shouldRetrieveRelatedCasesForQuery(
   }
 
   if (intent === 'traffic') {
-    return TRAFFIC_CASE_QUERY_PATTERN.test(normalized) && /(согтуу|согтуур|зугт|ял|осол|мөргө|шүргэ)/i.test(normalized);
+    return TRAFFIC_CASE_QUERY_PATTERN.test(normalized) && isSeriousTrafficCaseQuery(normalized);
   }
 
   if (intent === 'crime') {
@@ -2328,6 +2939,9 @@ function buildSearchQueries(query: string, shortQuery: boolean, rewrittenQuery: 
 
   const variants = new Set<string>([normalized]);
   const insuranceClaim = isTrafficInsuranceClaimQuery(normalized);
+  const trafficIncident = isTrafficIncidentQuestion(normalized);
+  const trafficSubtype = resolveTrafficIncidentSubtype(normalized);
+  const bankLoanSubtype = resolveContractSubtype(normalized);
 
   if (rewrittenQuery.trim()) {
     for (const part of rewrittenQuery
@@ -2363,10 +2977,44 @@ function buildSearchQueries(query: string, shortQuery: boolean, rewrittenQuery: 
     variants.add('хэрэглэгчийн эрх бараа бүтээгдэхүүн чанар буцаах солих мөнгө буцаах');
   }
 
+  if (bankLoanSubtype !== 'generic_contract') {
+    variants.add('иргэний хууль 451 банк зээлийн гэрээ');
+    variants.add('иргэний хууль 452 зээлийн хүү нэмэгдүүлсэн хүү');
+    variants.add('иргэний хууль 453 зээлдэгчийн үүрэг зээл буцаан төлөх');
+    variants.add('банк эрх бүхий хуулийн этгээдийн зээлийн үйл ажиллагааны тухай зээлийн гэрээ зээлийн хүү');
+
+    if (bankLoanSubtype === 'bank_loan_overdue') {
+      variants.add('банкнаас авсан зээл хугацаа хэтэрсэн төлбөр алданги нэмэгдүүлсэн хүү');
+    }
+
+    if (bankLoanSubtype === 'bank_loan_collateral') {
+      variants.add('барьцааны тухай хууль зээлийн барьцаа үүрэг гүйцэтгээгүй');
+    }
+
+    if (bankLoanSubtype === 'credit_information') {
+      variants.add('зээлийн мэдээллийн тухай хууль зээлийн түүх мэдээллийн сан');
+    }
+  }
+
   if (insuranceClaim) {
     variants.add('даатгалын тухай хууль нөхөн төлбөр татгалзсан үндэслэл');
     variants.add('иргэний хууль даатгалын гэрээ даатгалын тохиолдол нөхөн төлбөр');
     variants.add('жолоочийн даатгалын тухай хууль нөхөн төлбөр хохирол');
+  }
+
+  if (trafficIncident) {
+    variants.add('зөрчлийн тухай хууль 14.7 замын хөдөлгөөний дүрэм зөрчих жолооч ослын газар');
+    variants.add('замын хөдөлгөөний аюулгүй байдлын тухай хууль жолоочийн үүрэг ослын газар зогсох цагдаад мэдэгдэх');
+    variants.add('иргэний хууль 497 гэм хор эд хөрөнгийн хохирол нөхөн төлүүлэх');
+
+    if (trafficSubtype === 'parking_hit_and_run') {
+      variants.add('зогсоолд мөргөөд зугтсан жолооч камер цагдаа хохирол');
+      variants.add('ослын газраас зугтсан жолооч замын хөдөлгөөний дүрэм зөрчих');
+    } else if (trafficSubtype === 'minor_collision') {
+      variants.add('машин мөргөлдөх шүргэх хохирол цагдаа даатгал жолоочийн үүрэг');
+    } else if (trafficSubtype === 'dui_or_injury') {
+      variants.add('эрүүгийн хууль 27.10 тээврийн хэрэгслийн хөдөлгөөний аюулгүй байдал гэмтэл');
+    }
   }
 
   if (shortQuery && normalized.length > 0) {
@@ -2435,7 +3083,7 @@ function buildSearchQueries(query: string, shortQuery: boolean, rewrittenQuery: 
     variants.add('эрүүгийн хэрэг хянан шийдвэрлэх нотлох баримт хохирогч');
   }
 
-  return Array.from(variants).slice(0, insuranceClaim ? 8 : 12);
+  return Array.from(variants).slice(0, insuranceClaim ? 8 : bankLoanSubtype !== 'generic_contract' ? 9 : 12);
 }
 
 function extractPrimaryQuery(query: string): string {
@@ -2887,6 +3535,9 @@ function buildSources(query: string, _mode: QueryMode, chunks: ChromaQueryResult
     if (isTrafficInsuranceClaimQuery(query) && !isInsuranceClaimRelevantResult(query, chunk)) {
       continue;
     }
+    if (isBankLoanQuery(query) && !isBankLoanRelevantResult(query, chunk)) {
+      continue;
+    }
     if (isConsumerRefundQuery(query) && !isConsumerRefundRelevantResult(chunk)) {
       continue;
     }
@@ -3134,6 +3785,73 @@ function buildRelatedLaws(
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_RELATED_LAWS),
   );
+}
+
+function hasTrafficIncidentCanonicalRelatedLaw(laws: RelatedLaw[]): boolean {
+  return laws.some((law) => {
+    const title = normalizeText(law.title);
+    const articleNo = normalizeArticleNo(law.articleNo);
+    return (
+      (/зөрчлийн\s+тухай/i.test(title) && /^14\.?7/.test(articleNo)) ||
+      /замын\s+хөдөлгөөний\s+аюулгүй/i.test(title) ||
+      (/иргэний\s+хууль/i.test(title) && /^497/.test(articleNo))
+    );
+  });
+}
+
+function hasBankLoanCanonicalRelatedLaw(laws: RelatedLaw[]): boolean {
+  return laws.some((law) => {
+    const title = normalizeText(law.title);
+    const articleNo = normalizeArticleNo(law.articleNo);
+    return (
+      (/иргэний\s+хууль/i.test(title) && /^(451|452|453)(?:\.|$)?/.test(articleNo)) ||
+      /банк\s+эрх\s+бүхий.*зээлийн\s+үйл\s+ажиллагаа/i.test(title)
+    );
+  });
+}
+
+function mergeRelatedLawsByKey(primary: RelatedLaw[], fallback: RelatedLaw[]): RelatedLaw[] {
+  const merged = new Map<string, RelatedLaw>();
+
+  for (const law of [...primary, ...fallback]) {
+    const key = `${normalizeText(law.title)}:${normalizeArticleNo(law.articleNo)}`;
+    const existing = merged.get(key);
+    if (!existing || law.score > existing.score) {
+      merged.set(key, law);
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.score - a.score).slice(0, MAX_RELATED_LAWS);
+}
+
+function selectRelatedLawsWithFallback(
+  intent: QueryIntent,
+  query: string,
+  retrievedRelatedLaws: RelatedLaw[],
+): RelatedLaw[] {
+  if (isBankLoanQuery(query)) {
+    const bankFallback = buildBankLoanFallbackRelatedLaws(query);
+
+    if (!hasBankLoanCanonicalRelatedLaw(retrievedRelatedLaws)) {
+      return bankFallback;
+    }
+
+    return mergeRelatedLawsByKey(retrievedRelatedLaws, bankFallback);
+  }
+
+  if (isTrafficIncidentQuestion(query)) {
+    const trafficFallback = buildIntentFallbackRelatedLaws('traffic', query);
+
+    if (!hasTrafficIncidentCanonicalRelatedLaw(retrievedRelatedLaws)) {
+      return trafficFallback;
+    }
+
+    return mergeRelatedLawsByKey(retrievedRelatedLaws, trafficFallback);
+  }
+
+  return retrievedRelatedLaws.length > 0
+    ? retrievedRelatedLaws
+    : buildIntentFallbackRelatedLaws(intent, query);
 }
 
 function buildShuukhCaseUrl(caseId: string): string {
@@ -3680,6 +4398,91 @@ type IntentFallbackLaw = {
   score: number;
 };
 
+function buildBankLoanFallbackRelatedLaws(query: string): RelatedLaw[] {
+  const subtype = resolveContractSubtype(query);
+  if (subtype === 'generic_contract') {
+    return [];
+  }
+
+  const entries: IntentFallbackLaw[] = [
+    {
+      title: 'Иргэний хууль §452: Банк, зээлийн үйл ажиллагаа эрхлэх эрх бүхий этгээдээс олгох зээлийн хүү',
+      lawId: '299',
+      articleNo: '452',
+      sword: 'зээлийн хүү',
+      score: 0.88,
+    },
+    {
+      title: 'Иргэний хууль §451: Банк, зээлийн үйл ажиллагаа эрхлэх эрх бүхий хуулийн этгээдээс зээл олгох гэрээ',
+      lawId: '299',
+      articleNo: '451',
+      sword: 'зээл олгох гэрээ',
+      score: 0.86,
+    },
+    {
+      title: 'Иргэний хууль §453: Зээлдэгчийн үүрэг, хариуцлагатай холбоотой зохицуулалт',
+      lawId: '299',
+      articleNo: '453',
+      sword: 'зээлдэгч',
+      score: 0.78,
+    },
+    {
+      title:
+        'Банк, эрх бүхий хуулийн этгээдийн мөнгөн хадгаламж, мөнгөн хөрөнгийн шилжүүлэг, зээлийн үйл ажиллагааны тухай §20: Зээлийн гэрээ',
+      lawId: '16230554816671',
+      articleNo: '20',
+      sword: 'зээлийн гэрээ',
+      score: 0.76,
+    },
+  ];
+
+  if (subtype === 'bank_loan_collateral') {
+    entries.push(
+      {
+        title: 'Үл хөдлөх эд хөрөнгийн барьцааны тухай хууль',
+        lawId: '118',
+        sword: 'барьцаа',
+        score: 0.72,
+      },
+      {
+        title: 'Хөдлөх эд хөрөнгө болон эдийн бус хөрөнгийн барьцааны тухай хууль',
+        lawId: '11220',
+        sword: 'барьцааны эрх',
+        score: 0.7,
+      },
+    );
+  }
+
+  if (subtype === 'credit_information') {
+    entries.push({
+      title: 'Зээлийн мэдээллийн тухай хууль',
+      lawId: '9175',
+      sword: 'зээлийн мэдээлэл',
+      score: 0.74,
+    });
+  }
+
+  return finalizeDisplayScores(
+    entries
+      .map((entry) => {
+        const sword = entry.sword || entry.articleNo || '';
+        const url = sword
+          ? (buildLawUrlWithSword(entry.lawId, sword) ?? buildLawUrl(entry.lawId) ?? '')
+          : (buildLawUrl(entry.lawId) ?? '');
+
+        return {
+          title: entry.title,
+          articleNo: entry.articleNo ?? '',
+          url,
+          score: entry.score,
+          evidenceScore: entry.score,
+        };
+      })
+      .filter((law) => Boolean(law.url))
+      .slice(0, MAX_RELATED_LAWS),
+  );
+}
+
 function buildIntentFallbackRelatedLaws(intent: QueryIntent, query: string): RelatedLaw[] {
   const requestedArticle = extractRequestedArticleNumber(query);
   const familyPrimaryArticle = requestedArticle || '33.1';
@@ -3734,6 +4537,10 @@ function buildIntentFallbackRelatedLaws(intent: QueryIntent, query: string): Rel
         evidenceScore: 0.66,
       },
     ]);
+  }
+
+  if (isBankLoanQuery(query)) {
+    return buildBankLoanFallbackRelatedLaws(query);
   }
 
   const fallbackByIntent: Record<Exclude<QueryIntent, 'unknown'>, IntentFallbackLaw[]> = {
@@ -3888,29 +4695,22 @@ function buildIntentFallbackRelatedLaws(intent: QueryIntent, query: string): Rel
         title: 'Зөрчлийн тухай хууль §14.7',
         lawId: '12695',
         articleNo: '14.7',
-        sword: 'жолоодох эрх',
-        score: 0.74,
+        sword: 'замын хөдөлгөөний дүрэм',
+        score: 0.82,
       },
       {
         title: 'Замын хөдөлгөөний аюулгүй байдлын тухай хууль §5.1',
         lawId: '11224',
         articleNo: '5.1',
         sword: 'жолооч',
-        score: 0.72,
+        score: 0.78,
       },
       {
-        title: 'Эрүүгийн хууль §27.10',
-        lawId: '12172',
-        articleNo: '27.10',
-        sword: 'согтуугаар',
-        score: 0.67,
-      },
-      {
-        title: 'Автотээврийн тухай хууль §12.1',
-        lawId: '29',
-        articleNo: '12.1',
-        sword: 'тээврийн хэрэгсэл',
-        score: 0.6,
+        title: 'Иргэний хууль §497',
+        lawId: '299',
+        articleNo: '497',
+        sword: 'гэм хор',
+        score: 0.74,
       },
     ],
     crime: [
@@ -4044,3 +4844,17 @@ function isLowAuthorityTitle(title: string): boolean {
     normalized,
   );
 }
+
+export const __test__ = {
+  buildSearchQueries,
+  buildIntentFallbackRelatedLaws,
+  getRetrievalRuntimeConfig,
+  isTrafficIncidentQuestion,
+  isTrafficIncidentRelevantResult,
+  resolveTrafficIncidentSubtype,
+  resolveContractSubtype,
+  isBankLoanRelevantResult,
+  applyBankLoanFiltering,
+  buildBankLoanFallbackRelatedLaws,
+  shouldRetrieveRelatedCasesForQuery,
+};

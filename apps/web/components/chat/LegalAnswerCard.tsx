@@ -696,6 +696,21 @@ export function LegalAnswerCard({
             <LegalMarkdown text={parsed.mainBody} sources={sources} />
           </div>
         )}
+
+        {/* Skeleton placeholder while the LLM is still generating the answer.
+            Triggered when retrieval has produced laws but the answer text has
+            not begun streaming yet. */}
+        {!parsed.summary && !parsed.mainBody && (
+          <div className="space-y-2 rounded-lg border border-gray-100 bg-gray-50/40 p-4 dark:border-gray-700/40 dark:bg-gray-800/30">
+            <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+              Хариултыг боловсруулж байна…
+            </div>
+            <div className="h-3 w-11/12 animate-pulse rounded bg-gray-200/80 dark:bg-gray-700/50" />
+            <div className="h-3 w-9/12 animate-pulse rounded bg-gray-200/80 dark:bg-gray-700/50" />
+            <div className="h-3 w-10/12 animate-pulse rounded bg-gray-200/80 dark:bg-gray-700/50" />
+          </div>
+        )}
       </section>
 
       {/* Decision Flowchart */}

@@ -43,7 +43,8 @@ The workflow will:
 2. Build and push production images.
 3. Sync `PRODUCTION_ENV` into `/opt/legal-assist/.env` on the EC2 self-hosted runner.
 4. Pull and restart the new ECR images with Docker Compose.
-5. Run a public HTTPS health check.
+5. Apply the Postgre retrieval index migration from `apps/api/migrations/007_retrieval_postgres_indexes.sql`.
+6. Run a public HTTPS health check.
 
 If GitHub Actions is unavailable or the self-hosted runner is offline, use the local SSH fallback below.
 
@@ -70,6 +71,7 @@ This fallback:
 5. Builds `api`, `web`, and `worker` images on EC2.
 6. Pushes the images to ECR.
 7. Runs `docker/docker-compose.ecr.yml` with the generated production env.
+8. Applies the Postgre retrieval index migration inside the API container.
 
 Current public smoke-test URL:
 
@@ -141,6 +143,8 @@ The AWS deployment uses the PostgreSQL container on the EC2 host with the persis
 DATABASE_URL=postgresql://postgres:${DB_PASSWORD}@postgres:5432/legal_chatbot
 VECTOR_DB_PROVIDER=pgvector
 ```
+
+Production deploys automatically apply `apps/api/migrations/007_retrieval_postgres_indexes.sql` after the API container starts. This keeps the `documents` and `chunks` lookup indexes in sync with the Postgre/pgvector retrieval code and improves production retrieval latency.
 
 Docker images do not contain the production retrieval database. To make AWS behave like the local environment, copy the local `documents` and `chunks` tables, including pgvector embeddings, into the EC2 PostgreSQL volume:
 

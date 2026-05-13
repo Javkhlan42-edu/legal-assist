@@ -27,11 +27,11 @@ export const RETRIEVAL_CONFIG = {
 /** Generation configuration */
 export const GENERATION_CONFIG = {
   /** Maximum tokens for concise, complete Mongolian legal answers */
-  MAX_RESPONSE_TOKENS: 1400,
+  MAX_RESPONSE_TOKENS: 2400,
   /** Temperature for LLM (lower = more deterministic, higher = more creative) */
   TEMPERATURE: 0.3,
   /** Maximum conversation history messages to include */
-  MAX_HISTORY_MESSAGES: 4,
+  MAX_HISTORY_MESSAGES: 8,
 } as const;
 
 /** Rate limiting defaults */

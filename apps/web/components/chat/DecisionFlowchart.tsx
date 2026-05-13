@@ -11,44 +11,37 @@ export function extractFlowSteps(text: string): FlowStep[] {
   const steps: FlowStep[] = [];
   const lines = text.split('\n');
   let inActionSection = false;
+  const actionHeadingPattern =
+    /^(?:#{1,3}\s*|\*\*)?(?:Яг одоо хийх алхам|Яаралтай авах арга хэмжээ)(?:\*\*)?\s*$/i;
+  const markdownHeadingPattern = /^#{1,3}\s+/i;
+  const boldSectionHeadingPattern = /^\*\*[^*]{3,80}\*\*\s*$/;
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    if (/^#{1,3}\s*(?:Яг одоо хийх алхам|Яаралтай авах арга хэмжээ)/i.test(trimmed)) {
+    if (actionHeadingPattern.test(trimmed)) {
       inActionSection = true;
       continue;
     }
 
-    if (/^#{1,3}\s+/i.test(trimmed) && !/^#{1,3}\s*(?:Яг одоо хийх алхам|Яаралтай авах арга хэмжээ)/i.test(trimmed)) {
+    if (
+      inActionSection &&
+      (markdownHeadingPattern.test(trimmed) || boldSectionHeadingPattern.test(trimmed))
+    ) {
       inActionSection = false;
-    }
-
-    if (inActionSection) {
-      const numberedStep = trimmed.match(/^\d+\.\s+(.+)/);
-      if (numberedStep) {
-        const label = numberedStep[1].trim().replace(/:$/, '');
-        if (label.length >= 3 && label.length <= 120) {
-          steps.push({ label, isDecision: /\?|эсэх|үү|уу$|бол$/i.test(label) });
-        }
-        continue;
-      }
-    }
-
-    const numberedBold = trimmed.match(/^\d+\.\s*\*\*([^*]+)\*\*/);
-    if (numberedBold) {
-      const label = numberedBold[1].trim().replace(/:$/, '');
-      if (label.length >= 3 && label.length <= 80) {
-        steps.push({ label, isDecision: /\?|эсэх|үү|уу$|бол$/i.test(label) });
-      }
       continue;
     }
 
-    const standaloneBold = trimmed.match(/^\*\*(\d+\.\s*)?([^*]{4,60})\*\*\s*$/);
-    if (standaloneBold) {
-      const label = (standaloneBold[2] ?? '').trim().replace(/:$/, '');
-      if (label.length >= 3) {
-        steps.push({ label, isDecision: /\?|эсэх|үү|уу$|бол$/i.test(label) });
+    if (inActionSection) {
+      const stepMatch =
+        trimmed.match(/^\d+\.\s+\*\*([^*]+)\*\*\s*$/) ??
+        trimmed.match(/^\d+\.\s+(.+)/) ??
+        trimmed.match(/^[-*]\s+(.+)/);
+      if (stepMatch) {
+        const label = stepMatch[1].trim().replace(/:$/, '');
+        if (label.length >= 3 && label.length <= 120) {
+          steps.push({ label, isDecision: /\?|эсэх|үү|уу$|бол$/i.test(label) });
+        }
       }
     }
   }

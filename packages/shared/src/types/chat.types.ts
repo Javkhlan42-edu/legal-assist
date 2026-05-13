@@ -135,6 +135,23 @@ export interface ChatStreamStatusEvent {
   message: string;
 }
 
+/**
+ * Emitted once the retrieval phase finishes (before the LLM finishes generating
+ * the final answer). Lets the UI render Related Laws / Cases / Sources cards
+ * immediately while the answer text streams in afterwards, reducing perceived
+ * latency. Hosts that have not been updated to handle this event can safely
+ * ignore it — the final `complete` event still carries the authoritative
+ * snapshot.
+ */
+export interface ChatStreamRetrievalEvent {
+  type: 'retrieval';
+  sources: Source[];
+  relatedLaws: RelatedLaw[];
+  relatedCases: RelatedCase[];
+  sourcesUsed: number;
+  retrievalMs?: number;
+}
+
 export interface ChatStreamDeltaEvent {
   type: 'delta';
   delta: string;
@@ -153,6 +170,7 @@ export interface ChatStreamErrorEvent {
 export type ChatStreamEvent =
   | ChatStreamConversationEvent
   | ChatStreamStatusEvent
+  | ChatStreamRetrievalEvent
   | ChatStreamDeltaEvent
   | ChatStreamCompleteEvent
   | ChatStreamErrorEvent;

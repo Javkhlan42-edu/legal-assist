@@ -18,7 +18,11 @@ import {
   getConversationForUser,
   type MessageRecord,
 } from '../../repositories/conversation.repository.js';
-import { generate, type GenerationResult } from '../../services/generation.service.js';
+import {
+  generate,
+  cleanupAnswerStructure,
+  type GenerationResult,
+} from '../../services/generation.service.js';
 import {
   classifyLegalIntent,
   rewriteQuery,
@@ -26,6 +30,10 @@ import {
 } from '../../services/query-rewrite.service.js';
 import { search } from '../../services/retrieval.service.js';
 import { planChatWorkflow, type WorkflowEarlyResponse } from '../../services/chat-workflow.service.js';
+import {
+  classifyFollowUp,
+  type FollowUpHint,
+} from '../../services/follow-up-classifier.service.js';
 import { evaluateAnswerQuality } from '../../services/answer-quality.service.js';
 import type { ChromaQueryResult } from '../../lib/vector-db.js';
 
@@ -88,6 +96,28 @@ interface AssistantMetadataBuildParams {
   quality?: ChatQualityMetrics;
   keywordTerms?: string[];
   primaryDomain?: string;
+  followUpHint?: FollowUpHint | null;
+}
+
+/**
+ * Run the LLM-driven follow-up classifier, swallowing any failures so the
+ * pipeline stays resilient. Returns null when the classifier is disabled, the
+ * conversation has no history, or the call fails.
+ */
+async function maybeClassifyFollowUp(
+  env: Parameters<typeof classifyFollowUp>[0]['env'],
+  message: string,
+  history: ChatMessage[],
+): Promise<FollowUpHint | null> {
+  if (history.length === 0) {
+    return null;
+  }
+
+  try {
+    return await classifyFollowUp({ env, message, history });
+  } catch {
+    return null;
+  }
 }
 
 const MIN_CASE_UI_SCORE = 0.52;
@@ -163,10 +193,12 @@ export function registerChatRoute(app: FastifyInstance) {
       }
 
       const workflowStart = Date.now();
+      const followUpHint = await maybeClassifyFollowUp(app.env, message, history);
       const workflowPlan = planChatWorkflow({
         message,
         history,
         messageRecords: restoredMessageRecords,
+        followUpHint: followUpHint ?? undefined,
       });
       const workflowLatencyMs = Date.now() - workflowStart;
 
@@ -185,6 +217,7 @@ export function registerChatRoute(app: FastifyInstance) {
           carryForwardMode: workflowPlan.carryForwardMode,
           workflowNodes: workflowPlan.nodes,
           restoredHistory: history.length,
+          followUpHint: followUpHint ?? null,
           workflowLatencyMs,
         },
         'Chat request received',
@@ -217,6 +250,7 @@ export function registerChatRoute(app: FastifyInstance) {
               scope: workflowPlan.scope.scope,
               intent: workflowPlan.intent,
               carryForwardMode: workflowPlan.carryForwardMode,
+              followUpHint,
             }),
           );
         } catch (persistenceErr) {
@@ -331,7 +365,7 @@ export function registerChatRoute(app: FastifyInstance) {
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          { alreadyReranked: true, detailSubIntent: workflowPlan.detailSubIntent },
         ),
         app.env.GENERATION_TIMEOUT_MS,
       );
@@ -348,14 +382,18 @@ export function registerChatRoute(app: FastifyInstance) {
           },
           'Generation timed out; using deterministic grounded fallback',
         );
-        generationResult = await generate(
+        const fallbackGeneration = await generate(
           { ...app.env, OPENAI_API_KEY: '' },
           generationQuery,
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          { alreadyReranked: true, detailSubIntent: workflowPlan.detailSubIntent },
         );
+        generationResult = {
+          ...fallbackGeneration,
+          answer: cleanupAnswerStructure(fallbackGeneration.answer),
+        };
       } else {
         generationResult = generationOutcome.value;
       }
@@ -455,13 +493,14 @@ export function registerChatRoute(app: FastifyInstance) {
             retrievalQuery: workflowPlan.query,
             preferredLawIds: workflowPlan.preferredLawIds,
             contextChunks: retrievalResult?.contextChunks ?? workflowPlan.carryForwardChunks,
-          retrievalQuality,
-          quality,
-          keywordTerms: workflowPlan.keywordProfile.topicalTerms,
+            retrievalQuality,
+            quality,
+            keywordTerms: workflowPlan.keywordProfile.topicalTerms,
             primaryDomain:
               workflowPlan.keywordProfile.primaryDomain !== 'unknown'
                 ? workflowPlan.keywordProfile.primaryDomain
                 : workflowPlan.intent,
+            followUpHint,
           }),
         );
       } catch (persistenceErr) {
@@ -612,27 +651,31 @@ export function registerChatRoute(app: FastifyInstance) {
         conversationId,
       });
 
-      const existingConversation = requestedConversationId
-        ? await getConversationById(conversationId)
-        : null;
+      if (requestedConversationId) {
+        const [existingConversation, restoredConversation] = await Promise.all([
+          getConversationById(conversationId),
+          getConversationForUser(conversationId, authUser.id),
+        ]);
 
-      if (existingConversation && existingConversation.userId !== authUser.id) {
-        throw new Error('CONVERSATION_OWNERSHIP_MISMATCH');
-      }
+        if (existingConversation && existingConversation.userId !== authUser.id) {
+          throw new Error('CONVERSATION_OWNERSHIP_MISMATCH');
+        }
 
-      if (requestedConversationId && existingConversation) {
-        const restoredConversation = await getConversationForUser(conversationId, authUser.id);
-        restoredMessageRecords = restoredConversation.messages;
-        if (history.length === 0) {
-          history = toChatHistory(restoredMessageRecords);
+        if (existingConversation) {
+          restoredMessageRecords = restoredConversation.messages;
+          if (history.length === 0) {
+            history = toChatHistory(restoredMessageRecords);
+          }
         }
       }
 
       const workflowStart = Date.now();
+      const followUpHint = await maybeClassifyFollowUp(app.env, message, history);
       const workflowPlan = planChatWorkflow({
         message,
         history,
         messageRecords: restoredMessageRecords,
+        followUpHint: followUpHint ?? undefined,
       });
       const workflowLatencyMs = Date.now() - workflowStart;
 
@@ -651,6 +694,7 @@ export function registerChatRoute(app: FastifyInstance) {
           carryForwardMode: workflowPlan.carryForwardMode,
           workflowNodes: workflowPlan.nodes,
           restoredHistory: history.length,
+          followUpHint: followUpHint ?? null,
           streaming: true,
           workflowLatencyMs,
         },
@@ -691,6 +735,7 @@ export function registerChatRoute(app: FastifyInstance) {
               scope: workflowPlan.scope.scope,
               intent: workflowPlan.intent,
               carryForwardMode: workflowPlan.carryForwardMode,
+              followUpHint,
             }),
           );
         } catch (persistenceErr) {
@@ -806,6 +851,31 @@ export function registerChatRoute(app: FastifyInstance) {
             intent: requestIntent,
           });
 
+      // Push retrieval preview to the client so Related Laws / Cases / Sources
+      // cards render immediately while the LLM is still generating the answer.
+      // This is best-effort — if the generation later produces a `no-info`
+      // result the final `complete` event will overwrite these previews with
+      // an empty snapshot, which is the existing contract.
+      const previewSources = retrievalResult?.sources ?? workflowPlan.carryForwardSources;
+      const previewRelatedLaws =
+        retrievalResult?.relatedLaws ?? workflowPlan.carryForwardRelatedLaws;
+      const previewSourcesUsed =
+        retrievalResult?.sourcesUsed ?? previewSources.length;
+      if (
+        previewSources.length > 0 ||
+        previewRelatedLaws.length > 0 ||
+        filteredRelatedCases.length > 0
+      ) {
+        await sendEvent({
+          type: 'retrieval',
+          sources: previewSources,
+          relatedLaws: previewRelatedLaws,
+          relatedCases: filteredRelatedCases,
+          sourcesUsed: previewSourcesUsed,
+          retrievalMs: retrievalLatencyMs,
+        });
+      }
+
       await sendEvent({
         type: 'status',
         stage: 'generation',
@@ -824,7 +894,7 @@ export function registerChatRoute(app: FastifyInstance) {
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          { alreadyReranked: true, detailSubIntent: workflowPlan.detailSubIntent },
         ),
         app.env.GENERATION_TIMEOUT_MS,
       );
@@ -842,14 +912,18 @@ export function registerChatRoute(app: FastifyInstance) {
           },
           'Generation timed out; streaming deterministic grounded fallback',
         );
-        generationResult = await generate(
+        const fallbackGeneration = await generate(
           { ...app.env, OPENAI_API_KEY: '' },
           generationQuery,
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          { alreadyReranked: true, detailSubIntent: workflowPlan.detailSubIntent },
         );
+        generationResult = {
+          ...fallbackGeneration,
+          answer: cleanupAnswerStructure(fallbackGeneration.answer),
+        };
       } else {
         generationResult = generationOutcome.value;
       }
@@ -970,6 +1044,7 @@ export function registerChatRoute(app: FastifyInstance) {
               workflowPlan.keywordProfile.primaryDomain !== 'unknown'
                 ? workflowPlan.keywordProfile.primaryDomain
                 : workflowPlan.intent,
+            followUpHint,
           }),
         );
       } catch (persistenceErr) {
@@ -1136,6 +1211,13 @@ function buildAssistantMessageMetadata(params: AssistantMetadataBuildParams): Re
       carryForwardMode: params.carryForwardMode,
       primaryDomain: params.primaryDomain ?? params.intent,
       keywords: params.keywordTerms ?? [],
+      followUp: params.followUpHint
+        ? {
+            kind: params.followUpHint.kind,
+            confidence: params.followUpHint.confidence,
+            referencedTurnIndex: params.followUpHint.referencedTurnIndex ?? null,
+          }
+        : null,
     },
     retrievalSnapshot:
       params.contextChunks && params.contextChunks.length > 0
