@@ -57,11 +57,12 @@ cat >"$COMMAND_FILE" <<JSON
     "git checkout '${GIT_REF}'",
     "git pull --ff-only origin '${GIT_REF}'",
     "aws ssm get-parameter --name '${SSM_ENV_PARAMETER}' --with-decryption --query 'Parameter.Value' --output text > .env",
-    "printf '\\nAPI_IMAGE=${API_IMAGE}\\nWEB_IMAGE=${WEB_IMAGE}\\nWORKER_IMAGE=${WORKER_IMAGE}\\nAWS_REGION=${AWS_REGION}\\nDOMAIN_NAME=${DOMAIN_NAME}\\n' >> .env",
+    "printf '\\nAPI_IMAGE=${API_IMAGE}\\nWEB_IMAGE=${WEB_IMAGE}\\nWORKER_IMAGE=${WORKER_IMAGE}\\nAWS_REGION=${AWS_REGION}\\nDOMAIN_NAME=${DOMAIN_NAME}\\nVECTOR_DB_PROVIDER=pgvector\\nVECTOR_DB_FALLBACK=false\\nEMBEDDING_PROVIDER=openai\\nEMBEDDING_DIMENSION=3072\\nOPENAI_CHAT_MODEL=gpt-5.4\\nOPENAI_EMBEDDING_MODEL=text-embedding-3-small\\nOPENAI_TIMEOUT_MS=180000\\nRETRIEVAL_SPEED_MODE=quality\\nINCLUDE_RELATED_CASES=auto\\nRETRIEVAL_TIMEOUT_MS=180000\\nGENERATION_TIMEOUT_MS=180000\\nRESPONSE_LATENCY_BUDGET_MS=240000\\nUSE_CROSS_RERANKER=false\\n' >> .env",
     "aws ecr get-login-password --region '${AWS_REGION}' | docker login --username AWS --password-stdin '${API_IMAGE%%/*}'",
     "docker compose -f docker/docker-compose.ecr.yml pull",
     "docker compose -f docker/docker-compose.ecr.yml up -d --remove-orphans",
     "docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql",
+    "docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-retrieval-db.mjs",
     "docker compose -f docker/docker-compose.ecr.yml ps"
   ]
 }

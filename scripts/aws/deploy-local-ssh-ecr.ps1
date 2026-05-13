@@ -300,6 +300,8 @@ $prodEnv = @(
   'NEXT_PUBLIC_API_URL='
   'PUBLIC_HTTP_PORT=80'
   ('DB_PASSWORD=' + (New-RandomSecret 36))
+  'VECTOR_DB_PROVIDER=pgvector'
+  'VECTOR_DB_FALLBACK=false'
   ('OPENAI_API_KEY=' + $envMap['OPENAI_API_KEY'])
   ('OPENAI_CHAT_MODEL=' + $chatModel)
   ('OPENAI_EMBEDDING_MODEL=' + $embeddingModel)
@@ -425,6 +427,7 @@ printf '\nAPI_IMAGE=%s\nWEB_IMAGE=%s\nWORKER_IMAGE=%s\nAWS_REGION=%s\nDOMAIN_NAM
 docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
 docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-retrieval-db.mjs
 docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
 "@
 $remoteScriptFile = Join-Path $env:TEMP 'legal-assist-remote-deploy.sh'
