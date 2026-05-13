@@ -134,7 +134,23 @@ jobs:
           database_url = existing_values.get("DATABASE_URL", "")
           if not database_url and db_password:
               database_url = f"postgresql://postgres:{quote(db_password, safe='')}@postgres:5432/legal_chatbot"
-          openai_api_key = existing_values.get("OPENAI_API_KEY", "").strip() or os.environ.get("OPENAI_API_KEY_SECRET", "").strip()
+          def usable_openai_key(value: str) -> bool:
+              normalized = value.strip()
+              return (
+                  normalized.startswith("sk-")
+                  and len(normalized) >= 40
+                  and "your-production-key" not in normalized
+                  and "..." not in normalized
+              )
+
+          existing_openai_key = existing_values.get("OPENAI_API_KEY", "").strip()
+          secret_openai_key = os.environ.get("OPENAI_API_KEY_SECRET", "").strip()
+          if usable_openai_key(secret_openai_key):
+              openai_api_key = secret_openai_key
+          elif usable_openai_key(existing_openai_key):
+              openai_api_key = existing_openai_key
+          else:
+              openai_api_key = ""
           if not openai_api_key:
               raise SystemExit("OPENAI_API_KEY is missing. Add it to PRODUCTION_ENV or GitHub Secrets before deploying.")
 

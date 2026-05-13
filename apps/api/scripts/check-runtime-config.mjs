@@ -5,6 +5,11 @@ const bool = (value) => ['1', 'true', 'yes', 'on'].includes(String(value ?? '').
 const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5.4';
 const apiKey = process.env.OPENAI_API_KEY?.trim() ?? '';
 const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 180000);
+const openaiKeyLooksUsable =
+  apiKey.startsWith('sk-') &&
+  apiKey.length >= 40 &&
+  !apiKey.includes('your-production-key') &&
+  !apiKey.includes('...');
 
 const runtimeSummary = {
   nodeEnv: process.env.NODE_ENV || '',
@@ -19,14 +24,15 @@ const runtimeSummary = {
   generationTimeoutMs: process.env.GENERATION_TIMEOUT_MS || '',
   responseLatencyBudgetMs: process.env.RESPONSE_LATENCY_BUDGET_MS || '',
   openaiKeyConfigured: apiKey.length > 0,
+  openaiKeyLooksUsable,
 };
 
 console.log('Runtime config summary:');
 console.log(JSON.stringify(runtimeSummary, null, 2));
 
-if (!apiKey || apiKey.length < 20) {
+if (!openaiKeyLooksUsable) {
   console.error(
-    'OPENAI_API_KEY is missing or too short in the runtime container. Production would fall back to deterministic template answers.',
+    'OPENAI_API_KEY is missing, too short, or placeholder-like in the runtime container. Production would fall back to deterministic template answers.',
   );
   process.exit(1);
 }

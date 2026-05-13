@@ -57,7 +57,7 @@ cat >"$COMMAND_FILE" <<JSON
     "git checkout '${GIT_REF}'",
     "git pull --ff-only origin '${GIT_REF}'",
     "aws ssm get-parameter --name '${SSM_ENV_PARAMETER}' --with-decryption --query 'Parameter.Value' --output text > .env",
-    "if ! grep -Eq '^OPENAI_API_KEY=.{20,}' .env; then echo 'OPENAI_API_KEY is missing from SSM env parameter ${SSM_ENV_PARAMETER}; production would use weak fallback generation.' >&2; exit 1; fi",
+    "if ! grep -Eq '^OPENAI_API_KEY=sk-.{37,}' .env || grep -Eq '^OPENAI_API_KEY=.*(your-production-key|\\.\\.\\.)' .env; then echo 'OPENAI_API_KEY is missing or placeholder in SSM env parameter ${SSM_ENV_PARAMETER}; production would use weak fallback generation.' >&2; exit 1; fi",
     "printf '\\nAPI_IMAGE=${API_IMAGE}\\nWEB_IMAGE=${WEB_IMAGE}\\nWORKER_IMAGE=${WORKER_IMAGE}\\nAWS_REGION=${AWS_REGION}\\nDOMAIN_NAME=${DOMAIN_NAME}\\nVECTOR_DB_PROVIDER=pgvector\\nVECTOR_DB_FALLBACK=false\\nEMBEDDING_PROVIDER=openai\\nEMBEDDING_DIMENSION=3072\\nOPENAI_CHAT_MODEL=gpt-5.4\\nOPENAI_EMBEDDING_MODEL=text-embedding-3-small\\nOPENAI_TIMEOUT_MS=180000\\nRETRIEVAL_SPEED_MODE=quality\\nINCLUDE_RELATED_CASES=auto\\nRETRIEVAL_TIMEOUT_MS=180000\\nGENERATION_TIMEOUT_MS=180000\\nRESPONSE_LATENCY_BUDGET_MS=240000\\nUSE_CROSS_RERANKER=false\\n' >> .env",
     "aws ecr get-login-password --region '${AWS_REGION}' | docker login --username AWS --password-stdin '${API_IMAGE%%/*}'",
     "docker compose -f docker/docker-compose.ecr.yml pull",
