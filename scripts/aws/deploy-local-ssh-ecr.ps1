@@ -424,7 +424,7 @@ docker push $webImage
 printf '\nAPI_IMAGE=%s\nWEB_IMAGE=%s\nWORKER_IMAGE=%s\nAWS_REGION=%s\nDOMAIN_NAME=%s\n' '$apiImage' '$webImage' '$workerImage' '$Region' '$DomainName' >> .env
 docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
 docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
-docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node /app/scripts/apply-sql-migration.mjs /app/apps/api/migrations/007_retrieval_postgres_indexes.sql
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
 docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
 "@
 $remoteScriptFile = Join-Path $env:TEMP 'legal-assist-remote-deploy.sh'

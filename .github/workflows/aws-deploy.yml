@@ -159,7 +159,7 @@ jobs:
           docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
           docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
           docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api \
-            node /app/scripts/apply-sql-migration.mjs /app/apps/api/migrations/007_retrieval_postgres_indexes.sql
+            node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
           # Nginx resolves Docker service IPs at startup. Restart it after
           # web/api updates so it does not keep a stale upstream IP.
           docker compose --env-file .env -f docker/docker-compose.ecr.yml restart nginx
