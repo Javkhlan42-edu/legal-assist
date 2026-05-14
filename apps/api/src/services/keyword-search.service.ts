@@ -56,6 +56,43 @@ function getCachedKeywordResults(cacheKey: string): KeywordSearchResult[] | null
   return cloneKeywordResults(cached.results);
 }
 
+function getReusableCachedKeywordResults(
+  method: 'fts' | 'trgm',
+  query: string,
+  topK: number,
+  options: KeywordSearchOptions,
+): KeywordSearchResult[] | null {
+  const normalizedQuery = query.trim().toLowerCase();
+  const prefix = `${method}:${options.source ?? 'all'}:`;
+
+  for (const [cacheKey, cached] of keywordSearchCache.entries()) {
+    if (!cacheKey.startsWith(prefix)) {
+      continue;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+      keywordSearchCache.delete(cacheKey);
+      continue;
+    }
+
+    const rest = cacheKey.slice(prefix.length);
+    const separatorIndex = rest.indexOf(':');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const cachedTopK = Number(rest.slice(0, separatorIndex));
+    const cachedQuery = rest.slice(separatorIndex + 1);
+    if (!Number.isFinite(cachedTopK) || cachedTopK < topK || cachedQuery !== normalizedQuery) {
+      continue;
+    }
+
+    return cloneKeywordResults(cached.results.slice(0, topK));
+  }
+
+  return null;
+}
+
 function setCachedKeywordResults(cacheKey: string, results: KeywordSearchResult[]): void {
   if (keywordSearchCache.size >= KEYWORD_SEARCH_CACHE_MAX_ENTRIES) {
     const firstKey = keywordSearchCache.keys().next().value;
@@ -94,7 +131,9 @@ export class KeywordSearchService {
     }
 
     const cacheKey = buildKeywordCacheKey('fts', query, topK, options);
-    const cached = getCachedKeywordResults(cacheKey);
+    const cached =
+      getCachedKeywordResults(cacheKey) ??
+      getReusableCachedKeywordResults('fts', query, topK, options);
     if (cached) {
       return cached;
     }
@@ -188,7 +227,9 @@ export class KeywordSearchService {
     }
 
     const cacheKey = buildKeywordCacheKey('trgm', query, topK, options);
-    const cached = getCachedKeywordResults(cacheKey);
+    const cached =
+      getCachedKeywordResults(cacheKey) ??
+      getReusableCachedKeywordResults('trgm', query, topK, options);
     if (cached) {
       return cached;
     }

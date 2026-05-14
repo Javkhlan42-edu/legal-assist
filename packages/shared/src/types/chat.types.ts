@@ -88,6 +88,9 @@ export interface ChatUsage {
   /** Time spent retrieving and reranking legal sources */
   retrievalMs?: number;
 
+  /** Breakdown of retrieval stage timings for debugging latency regressions */
+  retrievalStages?: RetrievalStageTiming;
+
   /** Time spent generating or synthesizing the final answer */
   generationMs?: number;
 
@@ -99,6 +102,22 @@ export interface ChatUsage {
 
   /** Whether LLM generation exceeded the configured latency budget */
   generationTimedOut?: boolean;
+
+  /** Whether the answer was returned from the current conversation/session cache */
+  cacheHit?: boolean;
+
+  /** Cache source, when cacheHit is true */
+  cacheKind?: 'session_retrieval_exact_question' | 'global_retrieval_exact_question';
+}
+
+export interface RetrievalStageTiming {
+  embeddingMs: number;
+  vectorSearchMs: number;
+  keywordSearchMs: number;
+  fallbackAndFilterMs: number;
+  caseSearchMs: number;
+  rerankMs: number;
+  buildMs: number;
 }
 
 /** Automated answer quality metrics in the 0..1 range */
@@ -150,6 +169,7 @@ export interface ChatStreamRetrievalEvent {
   relatedCases: RelatedCase[];
   sourcesUsed: number;
   retrievalMs?: number;
+  retrievalStages?: RetrievalStageTiming;
 }
 
 export interface ChatStreamDeltaEvent {

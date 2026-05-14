@@ -71,6 +71,10 @@ function classifyReadableMongolianIntent(text: string): QueryIntent {
     return 'crime';
   }
 
+  if (/(нэр\s*төр|худал\s*мэдээлэл|гүтг|доромж|эд\s*хөрөнгө.{0,30}(эвд|гэмтээ|устга)|согтуугаар.{0,40}эд\s*хөрөнгө)/iu.test(query)) {
+    return 'crime';
+  }
+
   if (/(зөвшөөрөлгүй.{0,30}(?:зураг|нийтэл|тавь|пост)|(?:зураг|бичлэг).{0,30}зөвшөөрөлгүй|фэйсбүүк|facebook|сошиал|хувийн\s*мэдээлэл|хувийн\s*нууц)/iu.test(query)) {
     return 'crime';
   }
@@ -87,7 +91,7 @@ function classifyReadableMongolianIntent(text: string): QueryIntent {
     return 'crime';
   }
 
-  if (/(замын\s*хөдөлгөөн|зам\s*тээвэр|жолооч|машин|авто|осол|мөргөлд|мөргө|шүргэ|согтуу(?:гаар)?|зогсоол|паркинг|зугт)/iu.test(query)) {
+  if (/(замын\s*хөдөлгөөн|зам\s*тээвэр|жолооч|машин|авто|осол|мөргөлд|мөргө|шүргэ|зогсоол|паркинг|зугт|согтуу(?:гаар)?.{0,40}(жолоо|машин|тээврийн\s*хэрэгсэл|осол))/iu.test(query)) {
     return 'traffic';
   }
 
@@ -129,6 +133,10 @@ function classifyUnicodeLegalIntent(text: string): QueryIntent {
     return 'crime';
   }
 
+  if (/(нэр\s*төр|худал\s*мэдээлэл|гүтг|доромж|эд\s*хөрөнгө.{0,30}(эвд|гэмтээ|устга)|согтуугаар.{0,40}эд\s*хөрөнгө)/iu.test(query)) {
+    return 'crime';
+  }
+
   if (/(зөвшөөрөлгүй.{0,30}(?:зураг|нийтэл|тавь|пост)|(?:зураг|бичлэг).{0,30}зөвшөөрөлгүй|фэйсбүүк|facebook|сошиал|хувийн\s*мэдээлэл|хувийн\s*нууц)/iu.test(query)) {
     return 'crime';
   }
@@ -141,7 +149,7 @@ function classifyUnicodeLegalIntent(text: string): QueryIntent {
     return 'crime';
   }
 
-  if (/(замын\s*хөдөлгөөн|зам\s*тээвэр|жолооч|машин|авто|осол|мөргөлд|шүргэ|согтуу(?:гаар)?|зогсоол)/iu.test(query)) {
+  if (/(замын\s*хөдөлгөөн|зам\s*тээвэр|жолооч|машин|авто|осол|мөргөлд|шүргэ|зогсоол|согтуу(?:гаар)?.{0,40}(жолоо|машин|тээврийн\s*хэрэгсэл|осол))/iu.test(query)) {
     return 'traffic';
   }
 
@@ -267,6 +275,26 @@ function isCleanLaborDismissalQuery(query: string): boolean {
   return /(ажлаас|халагд|халуул|халсан|үндэслэлгүй|ажил\s*олгогч).{0,80}(яах|шийдвэрлэх|маргах|цалин|ажилд\s*эгүүлэн|тушаал|баримт)|(?:цалин|ажилд\s*эгүүлэн|тушаал|баримт).{0,80}(ажлаас|халагд|хөдөлмөр)/iu.test(query);
 }
 
+export function isAdministrativeReviewQuery(query: string): boolean {
+  return /(төрийн\s+байгууллага|өргөдөл|гомдол|захиргааны\s+байгууллага|захиргааны\s+шийдвэр|захиргааны\s+шүүх|захиргаа|зөвшөөрөл|лиценз).{0,90}(хариу|хугацаа|шийдвэр|гомдол|маргах|хүчингүй|шүүх|татгалз|цуцал)|(?:хариу|хугацаа|шийдвэр|гомдол|маргах|хүчингүй|шүүх|татгалз|цуцал).{0,90}(төрийн\s+байгууллага|өргөдөл|захиргааны\s+байгууллага|захиргааны\s+шийдвэр|захиргааны\s+шүүх|захиргаа|зөвшөөрөл|лиценз)/iu.test(query);
+}
+
+export function isLandRegistrationDisputeQuery(query: string): boolean {
+  return /(газар|газрын|кадастр|улсын\s+бүртгэл|үл\s+хөдлөх).{0,90}(давхц|татгалз|маргах|бүртгэл|гэрчилгээ|эзэмших|өмчлөх)/iu.test(query);
+}
+
+export function isCivilServiceDisciplineQuery(query: string): boolean {
+  return /(төрийн\s+алба|төрийн\s+албан\s+хаагч|албан\s+хаагч).{0,90}(сахилгын|шийтгэл|гомдол|давж|маргах)/iu.test(query);
+}
+
+export function isDefamationQuery(query: string): boolean {
+  return /(нэр\s*төр|худал\s*мэдээлэл|гүтг|доромж).{0,90}(тараа|нийтэл|халд|хариуцлага|мэдээлэл)|(?:тараа|нийтэл|халд|хариуцлага).{0,90}(нэр\s*төр|худал\s*мэдээлэл|гүтг|доромж)/iu.test(query);
+}
+
+export function isPropertyDamageCrimeQuery(query: string): boolean {
+  return /(эд\s*хөрөнг|хөрөнг).{0,90}(эвд|гэмтээ|устга|сүйтгэ)|(?:эвд|гэмтээ|устга|сүйтгэ).{0,90}(эд\s*хөрөнг|хөрөнг)/iu.test(query);
+}
+
 function resolveCleanCuratedQueryScenario(query: string, intent?: QueryIntent): CuratedQueryScenario {
   if (isCleanBankLoanQuery(query) && isCleanContractDebtQuery(query)) {
     return 'contract_debt';
@@ -318,6 +346,35 @@ function rewriteReadableMongolianQuery(userQuery: string, intent: QueryIntent, m
   if (isCleanPublicNoiseComplaintQuery(query)) {
     expansions.add('зөрчлийн тухай хууль амгалан тайван байдал алдагдуулах дуу чимээ');
     expansions.add('цагдаагийн албаны тухай хууль гомдол мэдээлэл дуудлага');
+  }
+
+  if (isAdministrativeReviewQuery(query)) {
+    expansions.add('захиргааны ерөнхий хууль захиргааны байгууллагын шийдвэр гомдол хугацаа');
+    expansions.add('захиргааны хэрэг шүүхэд хянан шийдвэрлэх тухай хууль нэхэмжлэл захиргааны шүүх');
+    expansions.add('иргэдээс төрийн байгууллага албан тушаалтанд гаргасан өргөдөл гомдлыг шийдвэрлэх тухай хууль');
+  }
+
+  if (isLandRegistrationDisputeQuery(query)) {
+    expansions.add('газрын тухай хууль кадастр газар эзэмших өмчлөх маргаан');
+    expansions.add('эд хөрөнгийн эрхийн улсын бүртгэлийн тухай хууль үл хөдлөх бүртгэл');
+    expansions.add('захиргааны хэрэг шүүхэд хянан шийдвэрлэх тухай хууль газрын бүртгэлийн маргаан');
+  }
+
+  if (isCivilServiceDisciplineQuery(query)) {
+    expansions.add('төрийн албаны тухай хууль сахилгын шийтгэл гомдол');
+    expansions.add('захиргааны ерөнхий хууль захиргааны шийдвэр давж гомдол');
+  }
+
+  if (isDefamationQuery(query)) {
+    expansions.add('эрүүгийн хууль гүтгэх худал мэдээлэл тараах нэр төр');
+    expansions.add('иргэний хууль нэр төр алдар хүнд хохирол нөхөн төлбөр');
+    expansions.add('эрүүгийн хэрэг хянан шийдвэрлэх тухай хууль нотлох баримт');
+  }
+
+  if (isPropertyDamageCrimeQuery(query)) {
+    expansions.add('эрүүгийн хууль бусдын эд хөрөнгө устгах гэмтээх');
+    expansions.add('иргэний хууль гэм хор эд хөрөнгийн хохирол нөхөн төлүүлэх');
+    expansions.add('цагдаагийн албаны тухай хууль гэмт хэргийн талаарх гомдол мэдээлэл');
   }
 
   if (isCleanTrafficInsuranceClaimQuery(query)) {
@@ -989,6 +1046,35 @@ export function rewriteQuery(userQuery: string): string {
     expansions.add('иргэний улсын бүртгэлийн тухай хууль паспорт бүртгэл');
   }
 
+  if (isAdministrativeReviewQuery(query)) {
+    expansions.add('захиргааны ерөнхий хууль захиргааны байгууллагын шийдвэр гомдол хугацаа');
+    expansions.add('захиргааны хэрэг шүүхэд хянан шийдвэрлэх тухай хууль нэхэмжлэл захиргааны шүүх');
+    expansions.add('иргэдээс төрийн байгууллага албан тушаалтанд гаргасан өргөдөл гомдлыг шийдвэрлэх тухай хууль');
+  }
+
+  if (isLandRegistrationDisputeQuery(query)) {
+    expansions.add('газрын тухай хууль кадастр газар эзэмших өмчлөх маргаан');
+    expansions.add('эд хөрөнгийн эрхийн улсын бүртгэлийн тухай хууль үл хөдлөх бүртгэл');
+    expansions.add('захиргааны хэрэг шүүхэд хянан шийдвэрлэх тухай хууль газрын бүртгэлийн маргаан');
+  }
+
+  if (isCivilServiceDisciplineQuery(query)) {
+    expansions.add('төрийн албаны тухай хууль сахилгын шийтгэл гомдол');
+    expansions.add('захиргааны ерөнхий хууль захиргааны шийдвэр давж гомдол');
+  }
+
+  if (isDefamationQuery(query)) {
+    expansions.add('эрүүгийн хууль гүтгэх худал мэдээлэл тараах нэр төр');
+    expansions.add('иргэний хууль нэр төр алдар хүнд хохирол нөхөн төлбөр');
+    expansions.add('эрүүгийн хэрэг хянан шийдвэрлэх тухай хууль нотлох баримт');
+  }
+
+  if (isPropertyDamageCrimeQuery(query)) {
+    expansions.add('эрүүгийн хууль бусдын эд хөрөнгө устгах гэмтээх');
+    expansions.add('иргэний хууль гэм хор эд хөрөнгийн хохирол нөхөн төлүүлэх');
+    expansions.add('цагдаагийн албаны тухай хууль гэмт хэргийн талаарх гомдол мэдээлэл');
+  }
+
   if (/завш|үрэгдүүл|шамшигдуул/i.test(query)) {
     expansions.add('эрүүгийн хууль бусдын эд хөрөнгийг завших үрэгдүүлэх');
     expansions.add('эрүүгийн хууль итгэмжлэн хариуцуулсан эд хөрөнгө завших');
@@ -1279,6 +1365,18 @@ export function classifyLegalIntent(userQuery: string): QueryIntent {
     return 'unknown';
   }
 
+  if (isDefamationQuery(query) || isPropertyDamageCrimeQuery(query)) {
+    return 'crime';
+  }
+
+  if (isPublicNoiseComplaintQuery(query)) {
+    return 'crime';
+  }
+
+  if (isAdministrativeReviewQuery(query) || isCivilServiceDisciplineQuery(query)) {
+    return 'unknown';
+  }
+
   const readableIntent = classifyReadableMongolianIntent(userQuery);
   if (readableIntent !== 'unknown') {
     return readableIntent;
@@ -1309,12 +1407,20 @@ export function classifyLegalIntent(userQuery: string): QueryIntent {
     return 'contract';
   }
 
-  if (isTrafficCollisionQuery(query)) {
-    return 'traffic';
+  if (isDefamationQuery(query) || isPropertyDamageCrimeQuery(query)) {
+    return 'crime';
   }
 
   if (isPublicNoiseComplaintQuery(query)) {
     return 'crime';
+  }
+
+  if (isAdministrativeReviewQuery(query) || isCivilServiceDisciplineQuery(query)) {
+    return 'unknown';
+  }
+
+  if (isTrafficCollisionQuery(query)) {
+    return 'traffic';
   }
 
   if (isPrivacyCyberAbuseQuery(query)) {

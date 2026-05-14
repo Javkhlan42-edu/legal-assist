@@ -104,6 +104,30 @@ describe('RetrievalService traffic quality guards', () => {
     expect(config.caseKeywordTopK).toBe(0);
   });
 
+  it('uses compact retrieval caps for common labor and consumer practical questions', () => {
+    const laborConfig = __test__.getRetrievalRuntimeConfig(
+      env,
+      'Ажлаас үндэслэлгүй халагдсан бол яаж шийдвэрлэх вэ?',
+      false,
+      false,
+      'labor',
+      'qa',
+    );
+    const consumerConfig = __test__.getRetrievalRuntimeConfig(
+      env,
+      'Онлайн дэлгүүрээс авсан бараа доголдолтой ирсэн бол буцаалт маргаж болох уу?',
+      false,
+      false,
+      'contract',
+      'qa',
+    );
+
+    expect(laborConfig.maxQueryVariants).toBeLessThanOrEqual(4);
+    expect(laborConfig.rerankCandidateLimit).toBeLessThanOrEqual(12);
+    expect(consumerConfig.maxQueryVariants).toBeLessThanOrEqual(4);
+    expect(consumerConfig.rerankCandidateLimit).toBeLessThanOrEqual(12);
+  });
+
   it('builds canonical traffic search variants', () => {
     const variants = __test__.buildSearchQueries(
       'Зогсоолд байсан машиныг мөргөөд зугтсан байна яаж шийдвэрлэх вэ?',
@@ -128,6 +152,27 @@ describe('RetrievalService traffic quality guards', () => {
     expect(labels).toContain('Иргэний хууль §497');
     expect(labels).not.toContain('Зөрчлийн тухай хууль §5');
     expect(labels).not.toContain('Зөрчлийн тухай хууль §6');
+  });
+
+  it('uses targeted fallback laws for administrative and crime evaluation failures', () => {
+    const petition = __test__.buildIntentFallbackRelatedLaws(
+      'unknown',
+      'Төрийн байгууллага миний өргөдөлд хугацаанд нь хариу өгөхгүй бол хаана гомдол гаргах вэ?',
+    );
+    const propertyDamage = __test__.buildIntentFallbackRelatedLaws(
+      'crime',
+      'Согтуугаар бусдын эд хөрөнгийг эвдсэн бол ямар хуулиар шийдвэрлэх вэ?',
+    );
+    const defamation = __test__.buildIntentFallbackRelatedLaws(
+      'crime',
+      'Бусдын нэр төрд халдсан худал мэдээлэл тараавал ямар хариуцлага үүсэх вэ?',
+    );
+
+    expect(petition.map((law) => law.title).join(' | ')).toContain('Захиргааны ерөнхий хууль');
+    expect(petition.map((law) => law.title).join(' | ')).not.toContain('Иргэний хууль §225.1');
+    expect(propertyDamage.map((law) => law.title).join(' | ')).toContain('Эрүүгийн хууль');
+    expect(propertyDamage.map((law) => law.title).join(' | ')).toContain('Иргэний хууль §497');
+    expect(defamation.map((law) => law.title).join(' | ')).toContain('Эрүүгийн хууль');
   });
 });
 

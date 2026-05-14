@@ -16,6 +16,11 @@ import {
   classifyLegalIntent,
   detectQueryMode,
   getIntentPreferredLawIds,
+  isAdministrativeReviewQuery,
+  isCivilServiceDisciplineQuery,
+  isDefamationQuery,
+  isLandRegistrationDisputeQuery,
+  isPropertyDamageCrimeQuery,
   isPublicNoiseComplaintQuery,
   isTrafficInsuranceClaimQuery,
   rewriteQuery,
@@ -48,6 +53,16 @@ export interface RelatedCase {
   decisionType?: string;
 }
 
+export interface RetrievalStageTiming {
+  embeddingMs: number;
+  vectorSearchMs: number;
+  keywordSearchMs: number;
+  fallbackAndFilterMs: number;
+  caseSearchMs: number;
+  rerankMs: number;
+  buildMs: number;
+}
+
 export interface RetrievalResult {
   /** All unique chunks used for context (sorted by score desc) */
   contextChunks: ChromaQueryResult[];
@@ -60,6 +75,8 @@ export interface RetrievalResult {
   /** Total unique sources used */
   sourcesUsed: number;
   retrievalQuality: RetrievalQuality;
+  /** Detailed retrieval latency breakdown for debugging production slowdowns */
+  retrievalTiming: RetrievalStageTiming;
 }
 
 export interface SearchOptions {
@@ -305,7 +322,7 @@ export async function search(
   options: SearchOptions = {},
 ): Promise<RetrievalResult> {
   const startTime = Date.now();
-  const timing = {
+  const timing: RetrievalStageTiming = {
     embeddingMs: 0,
     vectorSearchMs: 0,
     keywordSearchMs: 0,
@@ -374,6 +391,15 @@ export async function search(
     CHROMA_COLLECTION: env.CHROMA_COLLECTION,
     EMBEDDING_DIMENSION: env.EMBEDDING_DIMENSION,
   } as const;
+  const hasCyrillic = /[А-Яа-яӨөҮүЁё]/.test(baseQuery);
+  const keywordQuery = rewrittenQuery || baseQuery;
+  const initialKeywordSearchPromise = ENABLE_HYBRID_SEARCH
+    ? searchLegalKeywordWithMongolianFallback(
+        keywordQuery,
+        runtimeConfig.keywordTopK,
+        hasCyrillic,
+      )
+    : Promise.resolve([]);
 
   // Embed + vector search can fail when local embedding models are unavailable.
   // In that case, continue with keyword-only retrieval instead of failing the request.
@@ -481,8 +507,6 @@ export async function search(
 
   // ── 2. OPTIONAL KEYWORD SEARCH + RRF FUSION ───────────────
   let fusedResults: ChromaQueryResult[] = vectorResults;
-  const hasCyrillic = /[А-Яа-яӨөҮүЁё]/.test(baseQuery);
-  const keywordQuery = rewrittenQuery || baseQuery;
 
   if (ENABLE_HYBRID_SEARCH) {
     const keywordStart = Date.now();
@@ -498,14 +522,17 @@ export async function search(
     const keywordTopK = isWeakVectorSignal
       ? Math.min(runtimeConfig.keywordFallbackTopK, runtimeConfig.keywordTopK + 8)
       : runtimeConfig.keywordTopK;
-    let keywordResults = await keywordSearchService.search(keywordQuery, keywordTopK, {
-      source: 'legalinfo',
-    });
+    let keywordResults = await initialKeywordSearchPromise;
 
-    if (keywordResults.length === 0 && hasCyrillic) {
-      keywordResults = await keywordSearchService.searchMongolian(keywordQuery, keywordTopK, {
-        source: 'legalinfo',
-      });
+    if (keywordTopK > runtimeConfig.keywordTopK && keywordResults.length < keywordTopK) {
+      const expandedKeywordResults = await searchLegalKeywordWithMongolianFallback(
+        keywordQuery,
+        keywordTopK,
+        hasCyrillic,
+      );
+      if (expandedKeywordResults.length > keywordResults.length) {
+        keywordResults = expandedKeywordResults;
+      }
     }
 
     // FALLBACK: If keyword search returns few results, try with simpler query
@@ -587,41 +614,14 @@ export async function search(
   }
 
   const fallbackStart = Date.now();
-  fusedResults = applyFocusedFiltering(baseQuery, fusedResults);
-  fusedResults = await augmentWithSignalKeywordFallback(baseQuery, intent, fusedResults);
-  fusedResults = await augmentWithBankLoanFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithCyberFraudFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithInsuranceClaimFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithConsumerRefundFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithLaborDismissalFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithPublicNoiseFallback(baseQuery, fusedResults);
-  fusedResults = await augmentWithTrafficIncidentFallback(baseQuery, fusedResults);
-  if (shouldPreferCanonicalOverview) {
-    fusedResults = applyCanonicalLawFiltering(intent, fusedResults);
-  }
-  fusedResults = await augmentWithPreferredLawFallback(baseQuery, preferredLawIds, fusedResults);
-  fusedResults = applyPreferredLawBoost(baseQuery, intent, mode, preferredLawIds, fusedResults);
-  fusedResults = await augmentWithFocusedClauses(baseQuery, fusedResults);
-  fusedResults = applyTopicSignalFiltering(baseQuery, fusedResults);
-  fusedResults = applyBankLoanFiltering(baseQuery, fusedResults);
-  fusedResults = applyDomainFiltering(intent, fusedResults);
-  fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
-  fusedResults = applyInsuranceClaimFiltering(baseQuery, fusedResults);
-  fusedResults = applyConsumerRefundFiltering(baseQuery, fusedResults);
-  fusedResults = applyLaborDismissalFiltering(baseQuery, fusedResults);
-  fusedResults = applyPublicNoiseFiltering(baseQuery, fusedResults);
-  fusedResults = applyTrafficIncidentFiltering(baseQuery, fusedResults);
-  fusedResults = applyPreferredLawBoost(baseQuery, intent, mode, preferredLawIds, fusedResults);
-  if (shouldPreferCanonicalOverview) {
-    fusedResults = applyCanonicalLawFiltering(intent, fusedResults);
-  }
-  fusedResults = applyCyberFraudFiltering(baseQuery, fusedResults);
-  fusedResults = applyPropertyTransferBoost(baseQuery, fusedResults);
-  fusedResults = applyFamilyContactBoost(baseQuery, fusedResults);
-  if (mode === 'article') {
-    fusedResults = applyArticleBoost(baseQuery, fusedResults);
-    fusedResults = applyRequestedArticleFilter(baseQuery, fusedResults);
-  }
+  fusedResults = await applyAdaptiveFallbacksAndFilters({
+    query: baseQuery,
+    intent,
+    mode,
+    preferredLawIds,
+    shouldPreferCanonicalOverview,
+    results: fusedResults,
+  });
   timing.fallbackAndFilterMs += Date.now() - fallbackStart;
 
   let relatedCaseResults = runtimeConfig.retrieveRelatedCases ? caseVectorResults : [];
@@ -759,6 +759,7 @@ export async function search(
     relatedCases,
     sourcesUsed: topChunks.length,
     retrievalQuality,
+    retrievalTiming: timing,
   };
 }
 
@@ -782,6 +783,176 @@ function getMetaUrl(meta: Record<string, unknown>): string {
 
 function getResultLawId(result: ChromaQueryResult): string {
   return String(result.metadata.sourceId ?? result.metadata.lawId ?? '').trim();
+}
+
+function getResultTitle(result: ChromaQueryResult): string {
+  return String(result.metadata.title ?? result.metadata.documentTitle ?? '').trim();
+}
+
+function getResultCorpus(result: ChromaQueryResult): string {
+  return `${getResultTitle(result)} ${String(result.document ?? '')}`.toLowerCase();
+}
+
+async function searchLegalKeywordWithMongolianFallback(
+  query: string,
+  topK: number,
+  hasCyrillic: boolean,
+): Promise<KeywordSearchResult[]> {
+  let keywordResults = await keywordSearchService.search(query, topK, {
+    source: 'legalinfo',
+  });
+
+  if (keywordResults.length === 0 && hasCyrillic) {
+    keywordResults = await keywordSearchService.searchMongolian(query, topK, {
+      source: 'legalinfo',
+    });
+  }
+
+  return keywordResults;
+}
+
+interface AdaptiveFallbackParams {
+  query: string;
+  intent: QueryIntent;
+  mode: QueryMode;
+  preferredLawIds: string[];
+  shouldPreferCanonicalOverview: boolean;
+  results: ChromaQueryResult[];
+}
+
+async function applyAdaptiveFallbacksAndFilters(
+  params: AdaptiveFallbackParams,
+): Promise<ChromaQueryResult[]> {
+  const {
+    query,
+    intent,
+    mode,
+    preferredLawIds,
+    shouldPreferCanonicalOverview,
+  } = params;
+  const bankLoan = isBankLoanQuery(query);
+  const cyberFraud = isCyberFraudQuery(query);
+  const insuranceClaim = isTrafficInsuranceClaimQuery(query);
+  const consumerRefund = isConsumerRefundQuery(query);
+  const laborDismissal = isLaborDismissalOrWageQuery(query);
+  const publicNoise = isPublicNoiseComplaintQuery(query);
+  const trafficIncident = isTrafficIncidentQuestion(query);
+
+  let results = applyFocusedFiltering(query, params.results);
+  const strongInitialCoverage = hasStrongAdaptiveCoverage(query, intent, preferredLawIds, results);
+
+  if (!strongInitialCoverage) {
+    results = await augmentWithSignalKeywordFallback(query, intent, results);
+  }
+
+  if (bankLoan) {
+    results = await augmentWithBankLoanFallback(query, results);
+  } else if (cyberFraud) {
+    results = await augmentWithCyberFraudFallback(query, results);
+  } else if (insuranceClaim) {
+    results = await augmentWithInsuranceClaimFallback(query, results);
+  } else if (consumerRefund) {
+    results = await augmentWithConsumerRefundFallback(query, results);
+  } else if (laborDismissal) {
+    results = await augmentWithLaborDismissalFallback(query, results);
+  } else if (publicNoise) {
+    results = await augmentWithPublicNoiseFallback(query, results);
+  } else if (trafficIncident) {
+    results = await augmentWithTrafficIncidentFallback(query, results);
+  }
+
+  if (shouldPreferCanonicalOverview) {
+    results = applyCanonicalLawFiltering(intent, results);
+  }
+
+  const hasScenarioCoverage = hasStrongAdaptiveCoverage(query, intent, preferredLawIds, results);
+  if (!hasScenarioCoverage) {
+    results = await augmentWithPreferredLawFallback(query, preferredLawIds, results);
+  }
+
+  if (mode === 'article' || extractRequestedArticleNumber(query)) {
+    results = await augmentWithFocusedClauses(query, results);
+  }
+
+  results = applyTopicSignalFiltering(query, results);
+  results = applyDomainFiltering(intent, results);
+
+  if (bankLoan) {
+    results = applyBankLoanFiltering(query, results);
+  } else if (cyberFraud) {
+    results = applyCyberFraudFiltering(query, results);
+  } else if (insuranceClaim) {
+    results = applyInsuranceClaimFiltering(query, results);
+  } else if (consumerRefund) {
+    results = applyConsumerRefundFiltering(query, results);
+  } else if (laborDismissal) {
+    results = applyLaborDismissalFiltering(query, results);
+  } else if (publicNoise) {
+    results = applyPublicNoiseFiltering(query, results);
+  } else if (trafficIncident) {
+    results = applyTrafficIncidentFiltering(query, results);
+  }
+
+  results = applyPreferredLawBoost(query, intent, mode, preferredLawIds, results);
+  if (shouldPreferCanonicalOverview) {
+    results = applyCanonicalLawFiltering(intent, results);
+  }
+
+  results = applyPropertyTransferBoost(query, results);
+  results = applyFamilyContactBoost(query, results);
+
+  if (mode === 'article') {
+    results = applyArticleBoost(query, results);
+    results = applyRequestedArticleFilter(query, results);
+  }
+
+  return results;
+}
+
+function hasStrongAdaptiveCoverage(
+  query: string,
+  intent: QueryIntent,
+  preferredLawIds: string[],
+  results: ChromaQueryResult[],
+): boolean {
+  if (results.length === 0) {
+    return false;
+  }
+
+  const topResults = results.slice(0, 10);
+  const topScore = Number(topResults[0]?.score ?? 0);
+  const preferredHits = topResults.filter((result) => preferredLawIds.includes(getResultLawId(result))).length;
+
+  if (isBankLoanQuery(query)) {
+    const bankHits = topResults.filter((result) => isBankLoanRelevantResult(query, result));
+    const hasCoreArticle = bankHits.some((result) => {
+      const articleNo = String(result.metadata.articleNo ?? '').trim();
+      return ['451', '452', '453'].includes(articleNo);
+    });
+    return hasCoreArticle && bankHits.length >= 2 && topScore >= 0.65;
+  }
+
+  if (isTrafficIncidentQuestion(query)) {
+    const trafficHits = topResults.filter(isTrafficIncidentRelevantResult);
+    return trafficHits.length >= 2 && topScore >= 0.62;
+  }
+
+  if (isLaborDismissalOrWageQuery(query)) {
+    const laborHits = topResults.filter((result) => /хөдөлмөр|ажил|цалин|ажлаас|халах/i.test(getResultCorpus(result)));
+    return laborHits.length >= 2 && topScore >= 0.62;
+  }
+
+  if (isConsumerRefundQuery(query)) {
+    const consumerHits = topResults.filter((result) => /хэрэглэгч|худалда|доголдол|буцаалт|бараа/i.test(getResultCorpus(result)));
+    return consumerHits.length >= 2 && topScore >= 0.62;
+  }
+
+  const canonicalPatterns: RegExp[] =
+    intent === 'unknown' ? [] : CANONICAL_LAW_TITLE_PATTERNS[intent] ?? [];
+  const canonicalHits = canonicalPatterns.length > 0
+    ? topResults.filter((result) => canonicalPatterns.some((pattern) => pattern.test(getResultTitle(result)))).length
+    : 0;
+  return topScore >= 0.7 && (preferredHits >= 2 || canonicalHits >= 2);
 }
 
 function isBroadOverviewQuery(query: string, mode: QueryMode): boolean {
@@ -2511,7 +2682,7 @@ function resolveTrafficIncidentSubtype(query: string): TrafficIncidentSubtype {
 }
 
 function isExplicitRelatedCaseAsk(query: string): boolean {
-  return /(ижил\s+кейс|төстэй\s+кейс|шүүхийн\s+кейс|шүүхийн\s+шийдвэр|шүүхийн\s+практик|шийтгэх\s+тогтоол|магадлал|ямар\s+ял|ял\s+авах|хэргийн\s+жишээ)/i.test(
+  return /(ижил\s+кейс|төстэй\s+кейс|шүүхийн\s+кейс|case|кейс|кейсүүд|шүүхийн\s+шийдвэр|шүүхийн\s+практик|шүүхийн\s+жишиг|жишиг\s+шийдвэр|прецедент|шийтгэх\s+тогтоол|магадлал|ямар\s+ял|ял\s+авах|хэргийн\s+жишээ)/i.test(
     normalizeText(query),
   );
 }
@@ -2803,6 +2974,13 @@ function getRetrievalRuntimeConfig(
   const retrieveRelatedCases = shouldRetrieveRelatedCasesForQuery(env, query, intent, mode);
   const compactTrafficRetrieval = shouldUseCompactTrafficRetrieval(query, intent, mode);
   const compactBankLoanRetrieval = isBankLoanQuery(query) && mode === 'qa';
+  const compactLaborRetrieval = isLaborDismissalOrWageQuery(query) && mode === 'qa';
+  const compactConsumerRetrieval = isConsumerRefundQuery(query) && mode === 'qa';
+  const compactProfileRetrieval =
+    compactTrafficRetrieval ||
+    compactBankLoanRetrieval ||
+    compactLaborRetrieval ||
+    compactConsumerRetrieval;
   const useVectorSearch =
     !(
       speedMode === 'fast' &&
@@ -2812,7 +2990,7 @@ function getRetrievalRuntimeConfig(
     );
 
   if (speedMode === 'quality') {
-    if (compactTrafficRetrieval || compactBankLoanRetrieval) {
+    if (compactProfileRetrieval) {
       return {
         speedMode,
         useVectorSearch: true,
@@ -2865,7 +3043,7 @@ function getRetrievalRuntimeConfig(
   return {
     speedMode,
     useVectorSearch,
-    maxQueryVariants: compactTrafficRetrieval || compactBankLoanRetrieval ? 4 : isCyberFraudQuery(query) ? 4 : 6,
+    maxQueryVariants: compactProfileRetrieval ? 4 : isCyberFraudQuery(query) ? 4 : 6,
     vectorTopK: compactTrafficRetrieval
       ? (isSingleWord ? 24 : shortQuery ? 20 : 14)
       : compactBankLoanRetrieval
@@ -2876,13 +3054,13 @@ function getRetrievalRuntimeConfig(
       : compactBankLoanRetrieval
         ? (isSingleWord ? 30 : shortQuery ? 26 : 24)
         : isSingleWord ? 32 : shortQuery ? 26 : 24,
-    keywordFallbackTopK: compactTrafficRetrieval || compactBankLoanRetrieval ? 30 : 34,
+    keywordFallbackTopK: compactProfileRetrieval ? 30 : 34,
     caseVectorTopK: retrieveRelatedCases ? 12 : 0,
     caseKeywordTopK: retrieveRelatedCases ? 14 : 0,
     retrieveRelatedCases,
-    rerankCandidateLimit: compactTrafficRetrieval || compactBankLoanRetrieval ? 12 : 14,
+    rerankCandidateLimit: compactProfileRetrieval ? 12 : 14,
     finalTopResults: 6,
-    relatedLawCandidateLimit: compactTrafficRetrieval || compactBankLoanRetrieval ? 22 : 24,
+    relatedLawCandidateLimit: compactProfileRetrieval ? 22 : 24,
   };
 }
 
@@ -4486,6 +4664,108 @@ function buildBankLoanFallbackRelatedLaws(query: string): RelatedLaw[] {
 function buildIntentFallbackRelatedLaws(intent: QueryIntent, query: string): RelatedLaw[] {
   const requestedArticle = extractRequestedArticleNumber(query);
   const familyPrimaryArticle = requestedArticle || '33.1';
+
+  if (isAdministrativeReviewQuery(query)) {
+    return finalizeDisplayScores([
+      {
+        title: 'Захиргааны ерөнхий хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D0%B7%D0%B0%D1%85%D0%B8%D1%80%D0%B3%D0%B0%D0%B0%D0%BD%D1%8B%20%D0%B5%D1%80%D3%A9%D0%BD%D1%85%D0%B8%D0%B9%20%D1%85%D1%83%D1%83%D0%BB%D1%8C',
+        score: 0.78,
+        evidenceScore: 0.78,
+      },
+      {
+        title: 'Захиргааны хэрэг шүүхэд хянан шийдвэрлэх тухай хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D0%B7%D0%B0%D1%85%D0%B8%D1%80%D0%B3%D0%B0%D0%B0%D0%BD%D1%8B%20%D1%85%D1%8D%D1%80%D1%8D%D0%B3%20%D1%88%D2%AF%D2%AF%D1%85%D1%8D%D0%B4%20%D1%85%D1%8F%D0%BD%D0%B0%D0%BD%20%D1%88%D0%B8%D0%B9%D0%B4%D0%B2%D1%8D%D1%80%D0%BB%D1%8D%D1%85',
+        score: 0.74,
+        evidenceScore: 0.74,
+      },
+      {
+        title: 'Иргэдээс төрийн байгууллага, албан тушаалтанд гаргасан өргөдөл, гомдлыг шийдвэрлэх тухай хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D3%A9%D1%80%D0%B3%D3%A9%D0%B4%D3%A9%D0%BB%20%D0%B3%D0%BE%D0%BC%D0%B4%D0%BE%D0%BB',
+        score: 0.72,
+        evidenceScore: 0.72,
+      },
+    ]);
+  }
+
+  if (isLandRegistrationDisputeQuery(query)) {
+    return finalizeDisplayScores([
+      {
+        title: 'Газрын тухай хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D0%B3%D0%B0%D0%B7%D1%80%D1%8B%D0%BD%20%D1%82%D1%83%D1%85%D0%B0%D0%B9%20%D1%85%D1%83%D1%83%D0%BB%D1%8C%20%D0%BA%D0%B0%D0%B4%D0%B0%D1%81%D1%82%D1%80',
+        score: 0.78,
+        evidenceScore: 0.78,
+      },
+      {
+        title: 'Эд хөрөнгийн эрхийн улсын бүртгэлийн тухай хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D1%8D%D0%B4%20%D1%85%D3%A9%D1%80%D3%A9%D0%BD%D0%B3%D0%B8%D0%B9%D0%BD%20%D1%8D%D1%80%D1%85%D0%B8%D0%B9%D0%BD%20%D1%83%D0%BB%D1%81%D1%8B%D0%BD%20%D0%B1%D2%AF%D1%80%D1%82%D0%B3%D1%8D%D0%BB',
+        score: 0.7,
+        evidenceScore: 0.7,
+      },
+    ]);
+  }
+
+  if (isCivilServiceDisciplineQuery(query)) {
+    return finalizeDisplayScores([
+      {
+        title: 'Төрийн албаны тухай хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D1%82%D3%A9%D1%80%D0%B8%D0%B9%D0%BD%20%D0%B0%D0%BB%D0%B1%D0%B0%D0%BD%D1%8B%20%D1%82%D1%83%D1%85%D0%B0%D0%B9%20%D1%85%D1%83%D1%83%D0%BB%D1%8C%20%D1%81%D0%B0%D1%85%D0%B8%D0%BB%D0%B3%D1%8B%D0%BD',
+        score: 0.78,
+        evidenceScore: 0.78,
+      },
+      {
+        title: 'Захиргааны ерөнхий хууль',
+        articleNo: '',
+        url: 'https://legalinfo.mn/mn/search?keyword=%D0%B7%D0%B0%D1%85%D0%B8%D1%80%D0%B3%D0%B0%D0%B0%D0%BD%D1%8B%20%D0%B5%D1%80%D3%A9%D0%BD%D1%85%D0%B8%D0%B9%20%D1%85%D1%83%D1%83%D0%BB%D1%8C',
+        score: 0.68,
+        evidenceScore: 0.68,
+      },
+    ]);
+  }
+
+  if (isDefamationQuery(query)) {
+    return finalizeDisplayScores([
+      {
+        title: 'Эрүүгийн хууль',
+        articleNo: '',
+        url: buildLawUrlWithSword('12172', 'гүтгэх') ?? buildLawUrl('12172') ?? '',
+        score: 0.78,
+        evidenceScore: 0.78,
+      },
+      {
+        title: 'Иргэний хууль',
+        articleNo: '',
+        url: buildLawUrlWithSword('299', 'нэр төр') ?? buildLawUrl('299') ?? '',
+        score: 0.68,
+        evidenceScore: 0.68,
+      },
+    ]);
+  }
+
+  if (isPropertyDamageCrimeQuery(query)) {
+    return finalizeDisplayScores([
+      {
+        title: 'Эрүүгийн хууль',
+        articleNo: '',
+        url: buildLawUrlWithSword('12172', 'эд хөрөнгө гэмтээх') ?? buildLawUrl('12172') ?? '',
+        score: 0.78,
+        evidenceScore: 0.78,
+      },
+      {
+        title: 'Иргэний хууль §497',
+        articleNo: '497',
+        url: buildLawUrlWithSword('299', '497') ?? buildLawUrl('299') ?? '',
+        score: 0.7,
+        evidenceScore: 0.7,
+      },
+    ]);
+  }
 
   if (isCyberFraudQuery(query)) {
     return finalizeDisplayScores([

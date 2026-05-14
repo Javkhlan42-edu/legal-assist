@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import pg from 'pg';
+
+const { Client } = pg;
 
 const bool = (value) => ['1', 'true', 'yes', 'on'].includes(String(value ?? '').toLowerCase());
 
@@ -23,6 +26,11 @@ const runtimeSummary = {
   retrievalTimeoutMs: process.env.RETRIEVAL_TIMEOUT_MS || '',
   generationTimeoutMs: process.env.GENERATION_TIMEOUT_MS || '',
   responseLatencyBudgetMs: process.env.RESPONSE_LATENCY_BUDGET_MS || '',
+  retrievalCacheEnabled: bool(process.env.RETRIEVAL_CACHE_ENABLED ?? 'true'),
+  retrievalCacheTtlSeconds: process.env.RETRIEVAL_CACHE_TTL_SECONDS || '',
+  retrievalCacheMinQuality: process.env.RETRIEVAL_CACHE_MIN_QUALITY || '',
+  retrievalCacheVersion: process.env.RETRIEVAL_CACHE_VERSION || '',
+  databaseConfigured: Boolean(process.env.DATABASE_URL),
   openaiKeyConfigured: apiKey.length > 0,
   openaiKeyLooksUsable,
 };
@@ -35,6 +43,45 @@ if (!openaiKeyLooksUsable) {
     'OPENAI_API_KEY is missing, too short, or placeholder-like in the runtime container. Production would fall back to deterministic template answers.',
   );
   process.exit(1);
+}
+
+if (!process.env.DATABASE_URL) {
+  console.error('DATABASE_URL is missing; retrieval cache table cannot be verified.');
+  process.exit(1);
+}
+
+const dbClient = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  await dbClient.connect();
+  const { rows } = await dbClient.query(`
+    SELECT to_regclass('public.retrieval_cache') IS NOT NULL AS retrieval_cache_exists
+  `);
+  const cacheStatus = rows[0] ?? {};
+  let retrievalCacheEntries = 0;
+  if (cacheStatus.retrieval_cache_exists) {
+    const cacheRows = await dbClient.query(`SELECT COUNT(*)::int AS entries FROM retrieval_cache`);
+    retrievalCacheEntries = cacheRows.rows[0]?.entries ?? 0;
+  }
+  console.log('Retrieval cache DB status:');
+  console.log(
+    JSON.stringify(
+      {
+        retrieval_cache_exists: cacheStatus.retrieval_cache_exists ?? false,
+        retrieval_cache_entries: retrievalCacheEntries,
+      },
+      null,
+      2,
+    ),
+  );
+
+  if (!cacheStatus.retrieval_cache_exists) {
+    console.error(
+      'retrieval_cache table is missing. Deploy migration 008_create_retrieval_cache.sql before using production cache.',
+    );
+    process.exit(1);
+  }
+} finally {
+  await dbClient.end();
 }
 
 if (process.env.OPENAI_DEPLOY_SMOKE_TEST === 'false') {

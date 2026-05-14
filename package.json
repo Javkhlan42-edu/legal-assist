@@ -9,6 +9,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "pnpm --filter @legal-chatbot/api test",
+    "eval:rag": "pnpm --filter @legal-chatbot/api eval:rag",
     "test:all": "turbo run test",
     "db:summary": "node scripts/db-inspect.mjs summary",
     "db:documents": "node scripts/db-inspect.mjs documents",

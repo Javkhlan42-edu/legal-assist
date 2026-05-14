@@ -79,4 +79,34 @@ describe('QueryRewriteService', () => {
     expect(noise).toContain('амгалан тайван байдал алдагдуулах дуу чимээ');
     expect(noise).not.toContain('даатгалын тухай хууль');
   });
+
+  it('routes defamation and property-damage crime questions away from traffic and contract drift', () => {
+    const defamation =
+      'Бусдын нэр төрд халдсан худал мэдээлэл тараавал ямар хариуцлага үүсэх вэ?';
+    const propertyDamage =
+      'Согтуугаар бусдын эд хөрөнгийг эвдсэн бол ямар хуулиар шийдвэрлэх вэ?';
+
+    expect(classifyLegalIntent(defamation)).toBe('crime');
+    expect(classifyLegalIntent(propertyDamage)).toBe('crime');
+    expect(rewriteQuery(defamation)).toContain('гүтгэх худал мэдээлэл');
+    expect(rewriteQuery(propertyDamage)).toContain('эд хөрөнгө устгах гэмтээх');
+    expect(rewriteQuery(propertyDamage)).not.toContain('согтуугаар тээврийн хэрэгсэл жолоодох');
+  });
+
+  it('keeps administrative evaluation questions in administrative-law retrieval terms', () => {
+    const petition =
+      'Төрийн байгууллага миний өргөдөлд хугацаанд нь хариу өгөхгүй бол хаана гомдол гаргах вэ?';
+    const court =
+      'Захиргааны байгууллагын шийдвэрийг хүчингүй болгуулахад ямар шүүхэд хандах вэ?';
+    const land = 'Газрын кадастр давхцсан гэж бүртгэлээс татгалзвал ямар журмаар маргах вэ?';
+    const civilService =
+      'Төрийн албан хаагч сахилгын шийтгэл авсан бол давж гомдол гаргаж болох уу?';
+
+    expect(classifyLegalIntent(petition)).toBe('unknown');
+    expect(rewriteQuery(petition)).toContain('өргөдөл гомдлыг шийдвэрлэх');
+    expect(rewriteQuery(court)).toContain('захиргааны хэрэг шүүхэд хянан шийдвэрлэх');
+    expect(classifyLegalIntent(land)).toBe('contract');
+    expect(rewriteQuery(land)).toContain('газрын тухай хууль кадастр');
+    expect(rewriteQuery(civilService)).toContain('төрийн албаны тухай хууль сахилгын');
+  });
 });

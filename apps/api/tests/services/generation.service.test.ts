@@ -203,6 +203,68 @@ describe('GenerationService', () => {
     expectQaContract(result.answer);
   });
 
+  it('answers same-topic follow-ups in freeform mode without forcing the QA contract', async () => {
+    const bankLoanChunk = makeLegalChunk({
+      id: 'bank-loan-452',
+      document:
+        '452 дугаар зүйл. Банк, зээлийн үйл ажиллагаа эрхлэх эрх бүхий этгээдээс олгох зээлийн хүү. Зээлдэгч хугацаандаа төлөөгүй бол гэрээнд заасан нөхцөлөөр нэмэгдүүлсэн хүү тооцож болно.',
+      metadata: {
+        source: 'legalinfo',
+        sourceId: '299',
+        lawId: '299',
+        title: 'Иргэний хууль',
+        url: 'https://legalinfo.mn/mn/detail?lawId=299',
+        articleNo: '452',
+        chunkType: 'article',
+      },
+      score: 0.94,
+    });
+    chatCompletionMock.mockResolvedValue({
+      text:
+        'Банкны зээлийн төлбөр 3 сар хоцорсон асуудлын хувьд хамгийн түрүүнд зээлийн гэрээ, эргэн төлөлтийн хуваарь, хугацаа хэтэрсэн үлдэгдлийн задаргаа, банкнаас ирсэн мэдэгдлүүдийг цуглуулна. Мөн нэмэгдүүлсэн хүү тооцсон бол гэрээний аль заалтаар хэдэн төгрөг тооцсон тухай банкны бичгэн тайлбарыг ав. Эдгээр баримт нь банкны шаардлага гэрээ болон Иргэний хуулийн зээлийн хүүгийн зохицуулалттай нийцэж байгаа эсэхийг шалгахад хэрэгтэй.\nCONFIDENCE: 0.76\nSUGGESTED_QUESTIONS:\n- Нэмэгдүүлсэн хүүг яаж шалгах вэ?\n- Банканд төлбөрийн хуваарь өөрчлөх хүсэлт яаж бичих вэ?\n- Банкны тооцоо буруу байвал яаж маргах вэ?',
+      promptTokens: 220,
+      completionTokens: 80,
+    });
+
+    const result = await generate(
+      { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'ямар ямар баримт бичиг цуглуулах шаардлагатай вэ',
+      [bankLoanChunk],
+      [
+        {
+          role: 'user',
+          content: 'Банкнаас зээл аваад сүүлийн 3 сар төлбөрийг төлсөнгүй ямар арга хэмжээ авах вэ',
+        },
+        {
+          role: 'assistant',
+          content: 'Зээлийн гэрээ, хүү, нэмэгдүүлсэн хүү болон банкны тооцоог бичгээр шалгах хэрэгтэй.',
+        },
+      ],
+      [],
+      { alreadyReranked: true, detailSubIntent: 'documents', answerStyle: 'follow_up_freeform' },
+    );
+
+    expect(result.answer).toContain('зээлийн гэрээ');
+    expect(result.answer).toContain('нэмэгдүүлсэн хүү');
+    expect(result.answer).not.toContain('**Яг одоо хийх алхам**');
+    expect(result.answer).not.toContain('**Практик зөвлөгөө**');
+    expect(result.answer).toContain('хуульчийн албан ёсны зөвлөгөөг орлохгүй');
+    expect(chatCompletionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds the legal-information disclaimer once to substantive QA answers', async () => {
+    const result = await generate(
+      { OPENAI_API_KEY: 'test-key', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Банкнаас авсан зээл 2 сар төлөөгүй байгаа',
+      [],
+      [],
+    );
+
+    const disclaimerMatches = result.answer.match(/хуульчийн албан ёсны зөвлөгөөг орлохгүй/g) ?? [];
+    expect(disclaimerMatches).toHaveLength(1);
+    expectQaContract(result.answer);
+  });
+
   it('keeps generic unscoped liability questions as no-info', async () => {
     const result = await generate(
       { OPENAI_API_KEY: '', OPENAI_CHAT_MODEL: 'test-model' } as any,
@@ -246,6 +308,19 @@ describe('GenerationService', () => {
     expect(result.answer).toContain('мэдээлэл дутуу');
     expect(result.answer).toContain('Осол гарсан');
     expect(result.answer).toContain('цагдаа');
+    expect(result.mode).toBe('fallback-general');
+  });
+
+  it('uses neutral weak-context wording without leaking wrong-law phrasing', async () => {
+    const result = await generate(
+      { OPENAI_API_KEY: '', OPENAI_CHAT_MODEL: 'test-model' } as any,
+      'Захиргааны байгууллагын шийдвэрийг хүчингүй болгуулахад ямар шүүхэд хандах вэ?',
+      [],
+      [],
+    );
+
+    expect(result.answer).not.toContain('Буруу хууль');
+    expect(result.answer).toContain('зөв хууль, зүйл заалт оноохын тулд');
     expect(result.mode).toBe('fallback-general');
   });
 

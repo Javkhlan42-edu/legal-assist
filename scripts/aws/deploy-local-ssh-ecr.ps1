@@ -311,11 +311,15 @@ $prodEnv = @(
   'EMBEDDING_PROVIDER=openai'
   'EMBEDDING_DIMENSION=3072'
   'OPENAI_TIMEOUT_MS=180000'
-  'RETRIEVAL_SPEED_MODE=quality'
+  'RETRIEVAL_SPEED_MODE=balanced'
   'INCLUDE_RELATED_CASES=auto'
   'RETRIEVAL_TIMEOUT_MS=180000'
   'GENERATION_TIMEOUT_MS=180000'
   'RESPONSE_LATENCY_BUDGET_MS=240000'
+  'RETRIEVAL_CACHE_ENABLED=true'
+  'RETRIEVAL_CACHE_TTL_SECONDS=86400'
+  'RETRIEVAL_CACHE_MIN_QUALITY=0.55'
+  'RETRIEVAL_CACHE_VERSION=retrieval-context-v1'
   'USE_CROSS_RERANKER=false'
   ('JWT_SECRET=' + (New-RandomSecret 48))
   'GOOGLE_CLIENT_ID='
@@ -430,6 +434,7 @@ printf '\nAPI_IMAGE=%s\nWEB_IMAGE=%s\nWORKER_IMAGE=%s\nAWS_REGION=%s\nDOMAIN_NAM
 docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
 docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
+docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/apply-sql-migration.mjs migrations/008_create_retrieval_cache.sql
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-retrieval-db.mjs
 docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api node scripts/check-runtime-config.mjs
 docker compose --env-file .env -f docker/docker-compose.ecr.yml ps

@@ -93,6 +93,27 @@ const STRICT_QA_GENERATION_CONTRACT = `QA ХАРИУЛТЫН ЗААВАЛ БИЕ
 - "Хууль: ... Зүйл: ..." гэсэн raw retrieval/OCR текст, section-only diagram, системийн дотоод үг, context/retrieval/chunk/score гэх үгийг final answer-д бүү гарга.
 - Хэрэв эхний draft энэ стандартыг хангахгүй бол өөрөө дахин бичиж, дээрх бүх minimum-ийг биелүүлсэн бүтэн хариулт болго.`;
 
+const FOLLOW_UP_FREEFORM_SYSTEM_PROMPT = `Та Монгол Улсын хуулийн AI туслах. Энэ удаагийн асуулт нь өмнөх legal сэдвийн үргэлжлэл тул хэрэглэгчийн яг асуусан нарийн зүйлд шууд, ойлгомжтой хариул.
+
+FOLLOW-UP ДҮРЭМ:
+1. Өмнөх retrieval/context болон ярианы түүхийг ашигла. Шинэ хууль тааж зохиохгүй.
+2. Өмнөх үндсэн хариултыг бүтнээр нь давтахгүй.
+3. Хатуу QA template шахахгүй. "Зөвлөгөө", "Яг одоо хийх алхам", "Хуулийн тайлбар" гэх бүх section заавал хэрэглэх шаардлагагүй.
+4. Хэрэглэгч "ямар баримт", "дараа нь яах", "хаана хандах", "хугацаа хэд вэ" гэж асуувал тэр асуултад л төвлөр.
+5. Raw retrieval text, OCR мөр, "Хууль: ... Зүйл: ...", "Контекстэд...", "retrieval", "chunk", "score" зэрэг дотоод үгсийг final answer-д гаргахгүй.
+6. Хуулийг дурдвал хуурай дугаар жагсаахгүй, тухайн хэрэглэгчийн нөхцөлд яагаад хэрэгтэйг энгийн монголоор тайлбарла.
+7. Хариулт natural, practical, давхардалгүй байна. Богино байж болно, гэхдээ хэрэгтэй зүйлээ тодорхой хэл.
+
+ТӨГСГӨЛД ЗААВАЛ:
+CONFIDENCE: X.XX
+SUGGESTED_QUESTIONS:
+- [холбогдох дараагийн асуулт 1]
+- [холбогдох дараагийн асуулт 2]
+- [холбогдох дараагийн асуулт 3]`;
+
+const LEGAL_INFORMATION_DISCLAIMER =
+  'Энэхүү хариулт нь ерөнхий мэдээлэл бөгөөд хуульчийн албан ёсны зөвлөгөөг орлохгүй. Таны нөхцөлд тохирсон шийдвэр гаргахын өмнө мэргэжлийн хуульчаас зөвлөгөө аваарай.';
+
 function buildSystemPrompt(mode: QueryMode): string {
   if (mode === 'article') {
     return `${BASE_SYSTEM_PROMPT}
@@ -183,6 +204,7 @@ export type GenerationDetailSubIntent =
 
 interface GenerationOptions {
   alreadyReranked?: boolean;
+  answerStyle?: 'qa_contract' | 'follow_up_freeform';
   /**
    * When set to a value other than 'general', a sub-intent directive is
    * appended to the system prompt to focus the LLM on the specific aspect of
@@ -217,6 +239,8 @@ export async function generate(
 ): Promise<GenerationResult> {
   const primaryQuery = extractPrimaryQuery(query);
   const mode = detectQueryMode(primaryQuery);
+  const answerStyle = options.answerStyle ?? 'qa_contract';
+  const useFollowUpFreeform = mode === 'qa' && answerStyle === 'follow_up_freeform';
   const resolvedIntent = resolveIntent(primaryQuery, history);
 
   if (resolvedIntent === 'unknown' && isGenericUnscopedLegalQuestion(primaryQuery)) {
@@ -462,7 +486,7 @@ export async function generate(
       intentLawHint,
       allowedArticles,
     );
-    return mode === 'qa'
+    return mode === 'qa' && !useFollowUpFreeform
       ? ensureQaGenerationResultContract(
           {
             answer: fallback.answer,
@@ -502,13 +526,55 @@ export async function generate(
       ? SUB_INTENT_DIRECTIVES[options.detailSubIntent]
       : '';
 
+  const systemPrompt = useFollowUpFreeform
+    ? `${FOLLOW_UP_FREEFORM_SYSTEM_PROMPT}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}${
+        subIntentDirective ? `\n\nFOLLOW-UP ФОКУС:\n${subIntentDirective}` : ''
+      }`
+    : `${buildSystemPrompt(mode)}\n\n${QUALITY_FIRST_SYSTEM_APPENDIX}\n\n${STRICT_QA_GENERATION_CONTRACT}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}${
+        subIntentDirective ? `\n\n${subIntentDirective}` : ''
+      }`;
+
+  const userPrompt = useFollowUpFreeform
+    ? `ЭНЭ БОЛ ӨМНӨХ СЭДВИЙН ҮРГЭЛЖЛЭЛ АСУУЛТ.
+
+Өмнөх яриа болон доорх эх сурвалжийг ашиглаад хэрэглэгчийн одоогийн асуултад шууд хариул.
+Үндсэн QA template-ийг давтахгүй. Шинэ retrieval хийсэн мэт хууль нэмж таахгүй.
+
+ГОЛ ЛАВЛАХ ЗААЛТУУД:
+${contextReferenceGuide}
+
+КОНТЕКСТ (өмнөх retrieval/source):
+
+${contextBlock}
+
+---
+
+ХАРИУЛТЫН РЕЖИМ: FOLLOW_UP_FREEFORM
+АСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}
+КОНТЕКСТ ЧАНАР: ${contextStrength}
+ОДООГИЙН FOLLOW-UP АСУУЛТ: ${primaryQuery}`
+    : `ОДООГИЙН АСУУЛТАД ХАРИУЛ. Өмнөх яриа байгаа бол зөвхөн холбоотой үед туслах контекст гэж үз.
+
+ГОЛ ЛАВЛАХ ЗААЛТУУД:
+${contextReferenceGuide}
+
+КОНТЕКСТ (эх сурвалжууд):
+
+${contextBlock}
+
+---
+
+ХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}
+АСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}
+КОНТЕКСТ ЧАНАР: ${contextStrength}
+ЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}
+ОДООГИЙН АСУУЛТ: ${primaryQuery}`;
+
   // Build messages array
   const messages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
-      content: `${buildSystemPrompt(mode)}\n\n${QUALITY_FIRST_SYSTEM_APPENDIX}\n\n${STRICT_QA_GENERATION_CONTRACT}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}${
-        subIntentDirective ? `\n\n${subIntentDirective}` : ''
-      }`,
+      content: systemPrompt,
     },
     // Conversation history
     ...trimmedHistory.map(
@@ -520,7 +586,7 @@ export async function generate(
     // Current query with context
     {
       role: 'user',
-      content: `ОДООГИЙН АСУУЛТАД ХАРИУЛ. Өмнөх яриа байгаа бол зөвхөн холбоотой үед туслах контекст гэж үз.\n\nГОЛ ЛАВЛАХ ЗААЛТУУД:\n${contextReferenceGuide}\n\nКОНТЕКСТ (эх сурвалжууд):\n\n${contextBlock}\n\n---\n\nХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}\nАСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}\nКОНТЕКСТ ЧАНАР: ${contextStrength}\nЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}\nОДООГИЙН АСУУЛТ: ${primaryQuery}`,
+      content: userPrompt,
     },
   ];
 
@@ -590,6 +656,7 @@ export async function generate(
   // a vague restatement of the prior answer.
   if (
     mode === 'qa' &&
+    !useFollowUpFreeform &&
     options.detailSubIntent === 'documents' &&
     finalAnswer.trim() !== NO_INFO_RESPONSE &&
     isWeakDocumentChecklistAnswer(finalAnswer)
@@ -700,7 +767,7 @@ export async function generate(
     }
   }
 
-  if (mode === 'qa' && finalAnswer.trim() !== NO_INFO_RESPONSE) {
+  if (mode === 'qa' && !useFollowUpFreeform && finalAnswer.trim() !== NO_INFO_RESPONSE) {
     let qualityReport = validateQaAnswerQuality(finalAnswer);
     if (!qualityReport.ok || shouldForceDetailedQaAnswer(finalAnswer)) {
       const repaired = await repairWeakQaAnswer({
@@ -757,6 +824,8 @@ export async function generate(
       }
     }
   }
+
+  finalAnswer = appendLegalInformationDisclaimer(finalAnswer, mode);
 
   return {
     answer: finalAnswer,
@@ -1382,14 +1451,30 @@ function ensureQaGenerationResultContract(
 
   return {
     ...result,
-    answer: buildStructuredQaContractAnswer({
-      query,
-      intent,
-      chunks,
-      allowedArticles,
-      baseAnswer: result.answer,
-    }),
+    answer: appendLegalInformationDisclaimer(
+      buildStructuredQaContractAnswer({
+        query,
+        intent,
+        chunks,
+        allowedArticles,
+        baseAnswer: result.answer,
+      }),
+      'qa',
+    ),
   };
+}
+
+function appendLegalInformationDisclaimer(answer: string, mode: QueryMode): string {
+  const trimmed = answer.trim();
+  if (!trimmed || trimmed === NO_INFO_RESPONSE || mode !== 'qa') {
+    return answer;
+  }
+
+  if (trimmed.includes(LEGAL_INFORMATION_DISCLAIMER)) {
+    return trimmed;
+  }
+
+  return `${trimmed}\n\n${LEGAL_INFORMATION_DISCLAIMER}`;
 }
 
 /**
@@ -1403,7 +1488,7 @@ function hasOcrOrInternalLeakage(answer: string): boolean {
   }
 
   const internalJargon =
-    /(LLM\s+үйлчилгээ|Доорх\s+контекст|Контекстэд\s+давтагдсан|retrieval|source\s+score|chunk\s+score|системийн\s+дотоод|Эх\s+сурвалж\s*\d+\s*\])/iu;
+    /(LLM\s+үйлчилгээ|Доорх\s+контекст|Контекстэд\s+(?:давтагдсан|баталгаатайгаар)|retrieval|source\s+score|chunk\s+score|системийн\s+дотоод|Эх\s+сурвалж\s*\d+\s*\])/iu;
   if (internalJargon.test(answer)) {
     return true;
   }
@@ -1513,9 +1598,10 @@ export function cleanupAnswerStructure(answer: string): string {
     }
 
     if (
-      /^(?:Контекстэд давтагдсан|Контекст сул үед|retrieval|source score|LLM\s+үйлчилгээ|Доорх\s+контекст|\[Эх\s+сурвалж\s*\d+)/i.test(
+      /^(?:Контекстэд давтагдсан|Контекстэд баталгаатайгаар|Контекст сул үед|retrieval|source score|LLM\s+үйлчилгээ|Доорх\s+контекст|\[Эх\s+сурвалж\s*\d+)/i.test(
         current,
-      )
+      ) ||
+      /Контекстэд баталгаатайгаар/i.test(current)
     ) {
       continue;
     }
@@ -2804,7 +2890,7 @@ function buildWeakContextClarificationResult(
   return {
     answer: [
       'Илүү зөв хариулахын тулд хэдэн мэдээлэл дутуу байна.',
-      'Одоогийн асуултаар салбар нь ерөнхийдөө танигдаж байгаа боловч шууд тодорхой зүйл, заалт хэлэхэд эх сурвалж хангалттай баттай биш байна. Буруу хууль оноохоос сэргийлж эхлээд дараах мэдээллийг тодруулъя.',
+      'Одоогийн асуултаар салбар нь ерөнхийдөө танигдаж байгаа боловч шууд тодорхой зүйл, заалт хэлэхэд эх сурвалж хангалттай баттай биш байна. Эх сурвалжийг баталгаатай онохын тулд эхлээд дараах мэдээллийг тодруулъя.',
       '',
       'Яг юу нэмж бичих вэ',
       ...missingFacts.map((fact, index) => `${index + 1}. ${fact}`),
@@ -4379,10 +4465,10 @@ function enforceArticleGrounding(
 function upsertArticleSection(answer: string, allowedArticles: string[]): string {
   const sectionBody =
     allowedArticles.length > 0
-      ? `Контекстэд баталгаатайгаар ${allowedArticles
+      ? `Эх сурвалжид ${allowedArticles
           .map((article) => `${article} дугаар зүйл`)
-          .join(', ')} илэрсэн тул эдгээрийг зөвхөн дугаарын жагсаалт гэж харахгүй, таны бодит нөхцөлд ямар эрх, үүрэг, шаардлага үүсгэж байгаатай нь хамт тайлбарлах шаардлагатай.`
-      : 'Контекстэд баталгаатай зүйл илрээгүй тул хуулийн зүйл дугаарыг зохиож нэмэхгүй. Ийм үед баримтаа бүрдүүлж, эрх бүхий байгууллага эсвэл нөгөө талаас бичгээр тодруулга авах нь илүү найдвартай.';
+          .join(', ')} холбогдож байгаа тул эдгээр заалтыг зөвхөн дугаарын жагсаалт биш, таны бодит нөхцөлд үүсэх эрх, үүрэг, шаардлагатай нь холбож тайлбарлах хэрэгтэй.`
+      : 'Эх сурвалжаас энэ нөхцөлд шууд хэрэглэх тодорхой зүйл илрээгүй тул хуулийн зүйл дугаарыг зохиож нэмэхгүй. Ийм үед баримтаа бүрдүүлж, эрх бүхий байгууллага эсвэл нөгөө талаас бичгээр тодруулга авах нь илүү найдвартай.';
   const section = `**Хуулийн тайлбар**\n${sectionBody}`;
 
   return `${answer.trim()}\n\n${section}`;
