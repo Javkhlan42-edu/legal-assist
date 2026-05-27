@@ -19,7 +19,7 @@ This is a **Modular Monolith** built as a pnpm monorepo with three apps and two 
 - **shuukh.mn** — Mongolian court decisions
 - **legalinfo.mn** — Mongolian legal acts
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the complete system design document.
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the complete system design document.
 
 ## Quick Start
 
@@ -100,8 +100,11 @@ pnpm format       # Format code with Prettier
 │   ├── shared/       # Types, schemas, constants
 │   └── ui/           # Shared React components
 ├── docker/           # Docker configs
-├── scripts/          # Utility scripts
-└── ARCHITECTURE.md   # Full architecture document
+├── docs/             # Architecture, deployment, and project notes
+├── logs/             # Local runtime logs (ignored except .gitkeep)
+├── scripts/          # Utility and maintenance scripts
+├── test/             # API, worker, and manual test scripts
+└── README.md         # Project entrypoint
 ```
 
 ## License

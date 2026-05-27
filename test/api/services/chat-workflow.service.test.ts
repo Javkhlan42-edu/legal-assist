@@ -3,8 +3,8 @@ import type { ChatMessage } from '@legal-chatbot/shared';
 import {
   planChatWorkflow,
   type FollowUpHint,
-} from '../../src/services/chat-workflow.service.ts';
-import type { MessageRecord } from '../../src/repositories/conversation.repository.ts';
+} from '../../../apps/api/src/services/chat-workflow.service.ts';
+import type { MessageRecord } from '../../../apps/api/src/repositories/conversation.repository.ts';
 
 const LABOR_LAW_ID = '16230709635751';
 

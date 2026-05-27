@@ -6,13 +6,13 @@ const { rerankMock, chatCompletionMock, getOpenAIClientMock } = vi.hoisted(() =>
   getOpenAIClientMock: vi.fn(() => ({})),
 }));
 
-vi.mock('../../src/services/reranker.service.js', () => ({
+vi.mock('../../../apps/api/src/services/reranker.service.js', () => ({
   rerankerService: {
     rerank: rerankMock,
   },
 }));
 
-vi.mock('../../src/lib/llm-client.js', () => ({
+vi.mock('../../../apps/api/src/lib/llm-client.js', () => ({
   getOpenAIClient: getOpenAIClientMock,
   chatCompletion: chatCompletionMock,
 }));
@@ -25,7 +25,7 @@ import {
   stripOcrLeakage,
   cleanChunkDocumentForPrompt,
   validateQaAnswerQuality,
-} from '../../src/services/generation.service.ts';
+} from '../../../apps/api/src/services/generation.service.ts';
 
 function expectQaContract(answer: string) {
   const report = validateQaAnswerQuality(answer);

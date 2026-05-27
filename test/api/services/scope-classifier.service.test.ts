@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyScope } from '../../src/services/scope-classifier.service.ts';
+import { classifyScope } from '../../../apps/api/src/services/scope-classifier.service.ts';
 
 describe('ScopeClassifierService', () => {
   it('classifies cyber fraud questions as legal crime questions', () => {

@@ -4,7 +4,7 @@ import {
   isTrafficInsuranceClaimQuery,
   resolveCuratedQueryScenario,
   rewriteQuery,
-} from '../../src/services/query-rewrite.service.ts';
+} from '../../../apps/api/src/services/query-rewrite.service.ts';
 
 describe('QueryRewriteService', () => {
   it('classifies readable Mongolian labor, traffic, cyber, and consumer queries', () => {

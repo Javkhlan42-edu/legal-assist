@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { AppEnv } from '../../src/config/env.ts';
-import type { ChromaQueryResult } from '../../src/lib/vector-db.ts';
-import { __test__ } from '../../src/services/retrieval.service.ts';
+import type { AppEnv } from '../../../apps/api/src/config/env.ts';
+import type { ChromaQueryResult } from '../../../apps/api/src/lib/vector-db.ts';
+import { __test__ } from '../../../apps/api/src/services/retrieval.service.ts';
 
 function chunk(
   overrides: Partial<ChromaQueryResult> & {

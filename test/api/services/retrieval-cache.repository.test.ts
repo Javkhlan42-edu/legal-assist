@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/db.js', () => ({
+vi.mock('../../../apps/api/src/lib/db.js', () => ({
   dbQuery: vi.fn(),
 }));
 
-import { dbQuery } from '../../src/lib/db.js';
+import { dbQuery } from '../../../apps/api/src/lib/db.js';
 import {
   buildRetrievalCacheKey,
   getRetrievalCacheEntry,
   hasRetrievalCachePiiRisk,
   isRetrievalCacheEligibleQuestion,
   normalizeRetrievalCacheQuestion,
-} from '../../src/repositories/retrieval-cache.repository.js';
+} from '../../../apps/api/src/repositories/retrieval-cache.repository.js';
 
 const dbQueryMock = vi.mocked(dbQuery);
 

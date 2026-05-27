@@ -27,7 +27,8 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+logs/*
+!logs/.gitkeep
 
 # Data / cache / local exports
 data/

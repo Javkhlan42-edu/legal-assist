@@ -6,8 +6,8 @@ import {
   summarizeLatency,
   type EvaluationCitationSnapshot,
   type RetrievedSourceSnapshot,
-} from '../../src/evaluation/rag-eval-metrics.ts';
-import type { LegalEvalCase } from '../../src/evaluation/legal-eval-dataset.ts';
+} from '../../../apps/api/src/evaluation/rag-eval-metrics.ts';
+import type { LegalEvalCase } from '../../../apps/api/src/evaluation/legal-eval-dataset.ts';
 
 const baseCase: LegalEvalCase = {
   id: 'test-001',

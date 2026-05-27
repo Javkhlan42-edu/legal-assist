@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateAnswerQuality } from '../../src/services/answer-quality.service.ts';
+import { evaluateAnswerQuality } from '../../../apps/api/src/services/answer-quality.service.ts';
 
 describe('Answer quality metrics', () => {
   it('scores a grounded sourced answer highly', () => {
