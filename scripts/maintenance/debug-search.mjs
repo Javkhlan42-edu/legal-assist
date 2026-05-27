@@ -2,8 +2,8 @@
 // Debug Search Script — Test the retrieval pipeline
 // ────────────────────────────────────────────────────────────
 
-import { loadEnv } from './apps/api/src/config/env.js';
-import { search } from './apps/api/src/services/retrieval.service.js';
+import { loadEnv } from '../../apps/api/src/config/env.js';
+import { search } from '../../apps/api/src/services/retrieval.service.js';
 
 const env = loadEnv();
 

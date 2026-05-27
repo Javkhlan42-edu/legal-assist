@@ -28,7 +28,7 @@ Required secrets:
 - `PRODUCTION_ENV`
 - `OPENAI_API_KEY` (fallback if `PRODUCTION_ENV` does not include `OPENAI_API_KEY`)
 
-`PRODUCTION_ENV` should contain the production `.env` values. Use `.env.aws.example` as the template. The deploy workflow now refuses to continue if the runtime API container does not have a valid `OPENAI_API_KEY`, because otherwise production silently falls back to generic template answers instead of the high-quality LLM generation used locally.
+`PRODUCTION_ENV` should contain the production runtime environment values. Env template files are intentionally not committed to this repository, so keep production values only in GitHub Secrets or another deployment secret manager. The deploy workflow refuses to continue if the runtime API container does not have a valid `OPENAI_API_KEY`, because otherwise production silently falls back to generic template answers instead of the high-quality LLM generation used locally.
 
 Do not commit real secrets to git.
 

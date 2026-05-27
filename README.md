@@ -38,11 +38,9 @@ pnpm install
 # 2. Start infrastructure (Postgres + ChromaDB)
 docker compose -f docker/docker-compose.yml up -d
 
-# 3. Copy env files
-cp .env.example .env
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
-cp apps/worker/.env.example apps/worker/.env
+# 3. Create local env files manually when needed.
+#    Env files are intentionally gitignored and are not stored in this repo.
+#    Keep secrets in local files or deployment secret managers only.
 
 # 4. Start development servers
 pnpm dev
