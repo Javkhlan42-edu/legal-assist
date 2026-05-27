@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { normalizeText } from '../../src/processing/normalizer.js';
+import { normalizeText } from '../../../apps/worker/src/processing/normalizer.js';
 
 describe('normalizeText', () => {
   it('normalizes Unicode to NFC', () => {

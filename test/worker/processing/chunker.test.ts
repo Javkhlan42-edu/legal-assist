@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { ChunkingService } from '../../src/services/chunking.service.js';
+import { ChunkingService } from '../../../apps/worker/src/services/chunking.service.js';
 
 const chunkingService = new ChunkingService(16, 4);
 

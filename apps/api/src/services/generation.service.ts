@@ -27,22 +27,23 @@ const MIN_ARTICLE_SIGNAL_RATIO = 0.67;
 const BROAD_INTENT_OVERVIEW_PATTERN =
   /(эрх|үүрэг|дэлгэрэнгүй|мэдээлэл|тайлбар|ерөнхий|танилцуул|юу\s+зохицуулдаг|ямар\s+эрх|ямар\s+үүрэг)/i;
 
-const BASE_SYSTEM_PROMPT = `Та Монгол Улсын хуулийн AI зөвлөх. Хариулт нь хуульч хүн хэрэглэгчид тайлбарлаж байгаа мэт энгийн, тодорхой, хэрэгжүүлэх алхамтай байна.
+const BASE_SYSTEM_PROMPT = `Та Монгол Улсын хуулийн AI зөвлөх. Хариулт нь туршлагатай хуульч хэрэглэгчид тайлбарлаж байгаа мэт энгийн, цэгцтэй, хэрэгжүүлэх алхамтай, давхардалгүй байна.
 
 ГОЛ ДҮРЭМ:
-1. Зөвхөн өгөгдсөн контекст болон эх сурвалжид байгаа хууль, зүйл, заалтад тулгуурла.
-2. Контекстэд байхгүй зүйл, заалт, торгуулийн хэмжээ, хугацаа, байгууллагын эрхийг бүү зохио.
-3. Хэрэглэгчийн асуултад хамааралгүй эх сурвалж байвал ашиглахгүй. Эрүүгийн хууль, даатгал, банк, хөдөлмөр зэрэг салбар холилдвол асуултын бодит асуудалд хамгийн ойр 2-5 эх сурвалжийг л ашигла.
-4. "Контекстэд давтагдсан", "эх сурвалжийн score", "retrieval", "систем" гэх дотоод үгийг хэрэглэгчид бүү хэл.
-5. Өгүүлбэр бүрийг бүтэн дуусга. Хэт урт жагсаалт, давхардсан гарчиг, хоосон ерөнхий зөвлөгөө бүү бич.
-6. Хэрэв нотолгоо сул бол "энэ нөхцөлд эхлээд бичгээр тодруулж, баримтаа бүрдүүлэх шаардлагатай" гэж хэл. Итгэлгүй зүйлээ баттай мэт бүү бич.
+1. Зөвхөн өгөгдсөн контекст болон эх сурвалжид байгаа хууль, зүйл, заалтад тулгуурла. Заалтын дугаар, агуулгыг бүү зохио.
+2. Контекстэд байхгүй зүйл, заалт, торгуулийн хэмжээ, хугацаа, байгууллагын эрхийг таамаглахгүй. Хэрэв тодорхой биш бол "бичгээр тодруулж, баримтаа бүрдүүлэх шаардлагатай" гэж хэлнэ.
+3. Хэрэглэгчийн асуултад ХАМААРАЛГҮЙ хууль, зүйлийг бүрэн хас. Жишээ нь зам тээврийн ослын асуултад "мөнгө угаах", "хүн худалдаалах", "терроризм" гэх мэт огт хамаагүй заалтыг бүү дурд. Контекстэд олон салбарын заалт холилдсон бол асуултын бодит нөхцөлд хамгийн ойрхон 2-5 заалтыг л ашигла.
+4. КОНТЕКСТЭД ӨГӨГДСӨН ТҮҮХИЙ ТЕКСТИЙГ ХЭРЭГЛЭГЧИД БҮҮ ХУУЛЖ БУУЛГА. Тухайлбал "Хууль: <ТОМ ҮСЭГТ НЭР> Зүйл: <тоо> <ТОМ ҮСЭГТ ГАРЧИГ>" гэсэн OCR/preprocessed мөрийг хариулт руу хэзээ ч хуулж бичихгүй. "LLM үйлчилгээ түр боломжгүй", "Доорх контекстээс олдсон", "Контекстэд давтагдсан", "retrieval", "score", "систем", "chunk" гэх дотоод үгийг хэрэглэгчид бүү хэл.
+5. Хуулийн нэрийг хүн уншихад тохиромжтой хэлбэрээр (жишээ: "Хөдөлмөрийн тухай хууль /Шинэчилсэн найруулга/") бичнэ. ТОМ ҮСГЭЭР шуудхан хуулж бичихгүй.
+6. Өгүүлбэр бүрийг бүтэн дуусга. Хэт урт жагсаалт, давхардсан гарчиг, хоосон ерөнхий зөвлөгөө бүү бич.
+7. Хариулт нь монгол хуульч уншигчдад тааруулсан, бодит хэрэгжүүлэх алхамтай, давхардалгүй, түүхий мэдээлэл цацраагүй байна.
 
-ХАРИУЛТЫН БҮТЭЦ:
-1. Эхний 2-3 өгүүлбэрт шууд зөвлөгөө өг.
-2. "Яг одоо хийх алхам" хэсэгт 3-5 хэрэгжүүлэх алхам бич.
-3. "Хуулийн үндэслэл" хэсэгт зөвхөн хамааралтай хууль, зүйл, заалтыг тайлбарла. Нэг заалт бүрийг хэрэглэгчийн нөхцөлтэй холбож 1-2 өгүүлбэрээр тайлбарла.
-4. "Анхаарах эрсдэл" хэсэгт хугацаа, баримт, нотолгоо, нэмэлт хариуцлагын эрсдэлийг тайлбарла.
-5. "Практик зөвлөгөө" хэсэгт 3 богино зөвлөгөө өг.
+ХАРИУЛТЫН БҮТЭЦ (QA):
+1. "Зөвлөгөө" хэсэгт нөхцөл байдалд тохирсон дор хаяж 2 бүтэн өгүүлбэрийн шууд зөвлөгөө өг.
+2. "Яг одоо хийх алхам" хэсэгт 1-ээс эхэлсэн дор хаяж 5 хэрэгжүүлэх numbered action step бич.
+3. "Хуулийн тайлбар" хэсэгт зөвхөн хамааралтай хууль, зүйл, заалтыг хүний хэлээр тайлбарла. Энэ хэсэг дор хаяж 5 өгүүлбэртэй, заалт бүр хэрэглэгчийн нөхцөлд яаж үйлчлэхийг тайлбарласан байна. Эх сурвалжийн түүхий мөрийг бүү хуул.
+4. "Анхаарах эрсдэл" хэсэгт хугацаа, баримт, нотолгоо, нэмэлт хариуцлагын эрсдэлийг дор хаяж 2 өгүүлбэрээр тайлбарла.
+5. "Практик зөвлөгөө" хэсэгт дор хаяж 4 богино bullet зөвлөгөө өг.
 
 ИШЛЭЛ:
 - Контекстэд хуулийн нэр, articleNo, lawId, URL байгаа бол түүнийг ашигла.
@@ -61,6 +62,57 @@ const COURT_PRACTICE_SYSTEM_APPENDIX = `ШҮҮХИЙН ПРАКТИК АШИГЛ
 - shuukh.mn кейсийг зөвхөн төстэй нөхцөл, шүүхийн практик, эрсдэлийн чиг баримжаа гэж ашигла.
 - Шүүхийн кейсийг хууль, зүйл, заалтын оронд орлуулахгүй.
 - Төстэй кейс орсон бол "Шүүхийн практик" гэсэн богино хэсэгт кейсийн дугаар, гол төстэй нөхцөл, анхаарах эрсдэлийг л дурд.`;
+
+const QUALITY_FIRST_SYSTEM_APPENDIX = `ЧАНАР НЭГДҮГЭЭРТ:
+- Хурд биш, зөв ойлголт ба зөв тайлбар хамгийн чухал.
+- Одоогийн хэрэглэгчийн асуулт бол заавал хариулах үндсэн даалгавар. Өмнөх яриаг зөвхөн яг холбоотой follow-up үед л туслах контекст болгон ашигла.
+- Хэрэв одоогийн асуулт өмнөхөөс өөр салбар руу шилжсэн бол өмнөх хариултыг дуурайхгүй, одоогийн асуултад шинээр хариул.
+- Retrieval/context-ийн түүхий текстийг хэрэглэгчид бүү буулга. "Хууль: ... Зүйл: ..." гэх OCR/raw мөрүүдийг шууд хуулж болохгүй.
+- Хамааралгүй заалт гарч ирвэл бүрэн хас. Хуулийн нэр, зүйл дугаар дангаар нь хангалтгүй; заавал хэрэглэгчийн нөхцөлд яаж үйлчлэхийг энгийн монголоор тайлбарла.
+- "Хуулийн тайлбар" хэсэг нь лавлах жагсаалт биш. Хуулийн ишлэл бүрийг тухайн асуултын бодит нөхцөлтэй холбож, яагаад чухал болохыг өөрийн үгээр тайлбарласан нэгдмэл хуульчийн тайлбар байна.
+- Хэрэв хэрэглэгч "ямар баримт", "дараа нь яах вэ", "хугацаа нь хэд вэ" гэх follow-up асуулт асуувал өмнөх хууль зүйн асуудлыг үргэлжлүүлж, тэр нарийн асуултад шууд төвлөр. Эхний хариултыг бүтнээр нь дахин бүү давт.
+- Хариулт бүр хуульч хүн тайлбарлаж байгаа мэт ойлгомжтой, хэрэгжүүлэх алхамтай, давхардалгүй байна.
+- LLM эсвэл эх сурвалж сул байвал raw dump өгөхийн оронд баттай мэдэж буй практик алхам, тодруулах шаардлагатай зүйл, эрсдэлийг тайван тайлбарла.
+
+ХУУЛИЙН ТАЙЛБАР ХЭСГИЙН ХАТУУ ДҮРЭМ:
+- Final answer-д "Хуулийн үндэслэл" гарчиг бүү ашигла. Зөвхөн "Хуулийн тайлбар" гэсэн гарчиг ашигла.
+- "Хуулийн тайлбар" хэсэг нийтдээ дор хаяж 5 өгүүлбэртэй байна.
+- Хуулийн нэр, зүйл, заалтыг ЗААВАЛ markdown citation chip хэлбэрээр бич: [Хуулийн товчлол-ийн §зүйл](url). Жишээ: [ХТ-ийн §128](https://legalinfo.mn/mn/detail?lawId=...). URL заавал контекстээс ирсэн legalinfo.mn хаяг байна.
+- ТОМ ҮСЭГТ хуулийн гарчиг, зүйлийн нэр (жишээ нь "АЖИЛТНЫ ЦАЛИН ХӨЛСИЙГ ОЛГОХ ЖУРАМ") хариулт руу шууд хуулж бичихгүй. Том үсэгтэй гарчгийг ердийн бичигдэх хэлбэрт оруулна.
+- Заалт бүрийг тус тусад нь 1 богино өгүүлбэрээр тайлбарлаж, хэрэглэгчийн бодит нөхцөлд яаж үйлчлэхийг л хэлнэ. Контекстээс copy-paste хийхгүй.
+- Хэрэв холбогдох заалт олдоогүй бол хуурамчаар нэр томьёо зохиохгүй, харин "Энэ нөхцөлд хамгийн ойр заалт тодрохгүй байгаа тул баримтаа бүрдүүлж бичгээр тодруулах хэрэгтэй" гэж энгийнээр хэл.`;
+
+const STRICT_QA_GENERATION_CONTRACT = `QA ХАРИУЛТЫН ЗААВАЛ БИЕЛЭХ ШИНЭ СТАНДАРТ:
+- Хариулт богино template байж болохгүй. Хуульч хүн хэрэглэгчид бодит нөхцөлийг нь ойлгож тайлбарлаж байгаа мэт дэлгэрэнгүй, ойлгомжтой бич.
+- "Зөвлөгөө" хэсэг дор хаяж 2 бүтэн өгүүлбэртэй байна.
+- "Яг одоо хийх алхам" хэсэг заавал 1-ээс эхэлсэн дугаарласан дор хаяж 5 бодит action step-тэй байна.
+- "Хуулийн тайлбар" хэсэг дор хаяж 5 бүтэн өгүүлбэртэй байна. Энэ хэсэгт хууль, зүйл заалтыг хуурай жагсаахгүй; заалт бүр хэрэглэгчийн нөхцөлд яагаад хамаарах, ямар эрх/үүрэг/эрсдэл үүсгэхийг хүний хэлээр тайлбарлана.
+- "Анхаарах эрсдэл" хэсэг дор хаяж 2 бүтэн өгүүлбэртэй байна.
+- "Практик зөвлөгөө" хэсэг дор хаяж 4 bullet зөвлөгөөтэй байна.
+- "Хуулийн үндэслэл", "Хуулийн заалт: 11, 83, 4..." гэх хуурай жагсаалт бүү гарга. Үүний оронд зөвхөн "Хуулийн тайлбар" гэсэн хүний ойлгох тайлбар бич.
+- "Хууль: ... Зүйл: ..." гэсэн raw retrieval/OCR текст, section-only diagram, системийн дотоод үг, context/retrieval/chunk/score гэх үгийг final answer-д бүү гарга.
+- Хэрэв эхний draft энэ стандартыг хангахгүй бол өөрөө дахин бичиж, дээрх бүх minimum-ийг биелүүлсэн бүтэн хариулт болго.`;
+
+const FOLLOW_UP_FREEFORM_SYSTEM_PROMPT = `Та Монгол Улсын хуулийн AI туслах. Энэ удаагийн асуулт нь өмнөх legal сэдвийн үргэлжлэл тул хэрэглэгчийн яг асуусан нарийн зүйлд шууд, ойлгомжтой хариул.
+
+FOLLOW-UP ДҮРЭМ:
+1. Өмнөх retrieval/context болон ярианы түүхийг ашигла. Шинэ хууль тааж зохиохгүй.
+2. Өмнөх үндсэн хариултыг бүтнээр нь давтахгүй.
+3. Хатуу QA template шахахгүй. "Зөвлөгөө", "Яг одоо хийх алхам", "Хуулийн тайлбар" гэх бүх section заавал хэрэглэх шаардлагагүй.
+4. Хэрэглэгч "ямар баримт", "дараа нь яах", "хаана хандах", "хугацаа хэд вэ" гэж асуувал тэр асуултад л төвлөр.
+5. Raw retrieval text, OCR мөр, "Хууль: ... Зүйл: ...", "Контекстэд...", "retrieval", "chunk", "score" зэрэг дотоод үгсийг final answer-д гаргахгүй.
+6. Хуулийг дурдвал хуурай дугаар жагсаахгүй, тухайн хэрэглэгчийн нөхцөлд яагаад хэрэгтэйг энгийн монголоор тайлбарла.
+7. Хариулт natural, practical, давхардалгүй байна. Богино байж болно, гэхдээ хэрэгтэй зүйлээ тодорхой хэл.
+
+ТӨГСГӨЛД ЗААВАЛ:
+CONFIDENCE: X.XX
+SUGGESTED_QUESTIONS:
+- [холбогдох дараагийн асуулт 1]
+- [холбогдох дараагийн асуулт 2]
+- [холбогдох дараагийн асуулт 3]`;
+
+const LEGAL_INFORMATION_DISCLAIMER =
+  'Энэхүү хариулт нь ерөнхий мэдээлэл бөгөөд хуульчийн албан ёсны зөвлөгөөг орлохгүй. Таны нөхцөлд тохирсон шийдвэр гаргахын өмнө мэргэжлийн хуульчаас зөвлөгөө аваарай.';
 
 function buildSystemPrompt(mode: QueryMode): string {
   if (mode === 'article') {
@@ -99,24 +151,27 @@ SUGGESTED_QUESTIONS:
   return `${BASE_SYSTEM_PROMPT}
 
 MODE: QA
-Хэрэглэгч бодит асуудал асууж байгаа тул эхлээд шийдэх замыг тайлбарла, дараа нь хуулийн үндэслэлээ богино холбо.
+Хэрэглэгч бодит асуудал асууж байгаа тул эхлээд шийдэх замыг тайлбарла, дараа нь хуулийн тайлбараа хүний хэлээр өг.
 
 ЗАГВАР:
-[2-3 өгүүлбэрийн шууд зөвлөгөө]
+**Зөвлөгөө**
+[дор хаяж 2 өгүүлбэрийн шууд зөвлөгөө]
 
 **Яг одоо хийх алхам**
 1. ...
 2. ...
 3. ...
+4. ...
+5. ...
 
-**Хуулийн үндэслэл**
-1. **[Хуулийн нэр] §[зүйл]** — [энэ заалт хэрэглэгчийн нөхцөлд яаж үйлчлэхийг тайлбарла]
-2. ...
+**Хуулийн тайлбар**
+[дор хаяж 5 өгүүлбэрээр: холбогдох заалтуудыг raw text биш, хэрэглэгчийн нөхцөлтэй холбож тайлбарла]
 
 **Анхаарах эрсдэл**
-[нотолгоо, хугацаа, буруу алхам хийвэл үүсэх үр дагаврыг тайлбарла]
+[нотолгоо, хугацаа, буруу алхам хийвэл үүсэх үр дагаврыг дор хаяж 2 өгүүлбэрээр тайлбарла]
 
 **Практик зөвлөгөө**
+- ...
 - ...
 - ...
 - ...
@@ -140,9 +195,35 @@ export interface GenerationResult {
   suggestedQuestions: string[];
 }
 
+export type GenerationDetailSubIntent =
+  | 'documents'
+  | 'timeline'
+  | 'where_to_go'
+  | 'next_step'
+  | 'general';
+
 interface GenerationOptions {
   alreadyReranked?: boolean;
+  answerStyle?: 'qa_contract' | 'follow_up_freeform';
+  /**
+   * When set to a value other than 'general', a sub-intent directive is
+   * appended to the system prompt to focus the LLM on the specific aspect of
+   * a prior topic the user is asking about (e.g. "ямар баримт бүрдүүлэх вэ?")
+   * instead of regenerating the original full answer template.
+   */
+  detailSubIntent?: GenerationDetailSubIntent;
 }
+
+const SUB_INTENT_DIRECTIVES: Record<Exclude<GenerationDetailSubIntent, 'general'>, string> = {
+  documents:
+    'ХЭРЭГЛЭГЧИЙН АСУУЛТЫН ФОКУС: Өмнөх асуудлын хүрээнд хэрэглэгчид бүрдүүлэх баримт бичиг, нотлох баримтын жагсаалт хэрэгтэй байна. ӨМНӨХ ХАРИУЛТЫГ БҮТЭН ДАВТАХГҮЙ, гэхдээ QA contract-ийн бүтцийг заавал хадгал: Зөвлөгөө, Яг одоо хийх алхам, Хуулийн тайлбар, Анхаарах эрсдэл, Практик зөвлөгөө. "Яг одоо хийх алхам" хэсэгт дор хаяж 5 numbered алхам бичиж, алхам бүрт ямар баримт авах, хаанаас авах, эх хувь/хуулбар эсэх, хэний гарын үсэг/тамга хэрэгтэйг тодорхой тайлбарла. "Хуулийн тайлбар" хэсэг нь баримт бүр яагаад хууль зүйн ач холбогдолтойг хүний хэлээр тайлбарласан байна.',
+  timeline:
+    'ХЭРЭГЛЭГЧИЙН АСУУЛТЫН ФОКУС: Өмнөх асуудлын хугацаа, эцсийн огноо, мэдэгдэл/гомдол гаргах хугацаа, хугацаа хэтэрсэн үед үүсэх үр дагавар. ӨМНӨХ ХАРИУЛТЫГ БҮТЭН ДАВТАХГҮЙ. Хугацааны хэсгийг хууль зүйлтэй нь холбож бодитоор бич; хэрэв контекстэд яг хугацаа байхгүй бол "хуульд тусгайлан тодорхойлсон хугацаа олдохгүй байгаа тул эрх бүхий байгууллагын журамт хугацааг тусгайлан шалгах хэрэгтэй" гэж тайван хэл.',
+  where_to_go:
+    'ХЭРЭГЛЭГЧИЙН АСУУЛТЫН ФОКУС: Өмнөх асуудалд аль байгууллага/шүүх/хэнд хандах, эхлээд яаж хандах, ямар өргөдөл/хүсэлт өгөх. ӨМНӨХ ХАРИУЛТЫГ БҮТЭН ДАВТАХГҮЙ. Байгууллага тус бүрийг өргөдөл/гомдол хүлээн авах хэлбэрийг тодорхой бич, өргөдөл өгөх арга (бичгээр/цахим бүртгэл/биечлэн), дараагийн шат руу (шүүх/эрх бүхий байгууллага) яаж шилжих вэ гэдгийг харуул.',
+  next_step:
+    'ХЭРЭГЛЭГЧИЙН АСУУЛТЫН ФОКУС: Өмнөх хариултаас хойш ирэх яг дараагийн алхмууд. ӨМНӨХ ХАРИУЛТЫГ БҮТЭН ДАВТАХГҮЙ. "Яг одоо хийх алхам" хэсэгт дор хаяж 5 numbered алхам бичиж, алхам бүрийг хэзээ хийх, ямар баримттай хийх, үр дүнг хэрхэн баримтжуулахыг хамт тайлбарла.',
+};
 
 /**
  * Generate a grounded answer using retrieved context chunks.
@@ -158,6 +239,8 @@ export async function generate(
 ): Promise<GenerationResult> {
   const primaryQuery = extractPrimaryQuery(query);
   const mode = detectQueryMode(primaryQuery);
+  const answerStyle = options.answerStyle ?? 'qa_contract';
+  const useFollowUpFreeform = mode === 'qa' && answerStyle === 'follow_up_freeform';
   const resolvedIntent = resolveIntent(primaryQuery, history);
 
   if (resolvedIntent === 'unknown' && isGenericUnscopedLegalQuestion(primaryQuery)) {
@@ -183,31 +266,66 @@ export async function generate(
     isBankLoanOverdueQuery(primaryQuery) || isBankLoanOverdueQuery(query);
 
   if (mode === 'qa' && publicNoiseScenario && contextChunks.length === 0) {
-    return buildPublicNoiseFallback([]);
+    return ensureQaGenerationResultContract(
+      buildPublicNoiseFallback([]),
+      'unknown',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && bankLoanOverdueScenario && contextChunks.length === 0) {
-    return buildBankLoanOverdueFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildBankLoanOverdueFallback(primaryQuery, []),
+      'contract',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && consumerRefundScenario && contextChunks.length === 0) {
-    return buildConsumerRefundFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildConsumerRefundFallback(primaryQuery, []),
+      'contract',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && laborDismissalOrWageScenario && contextChunks.length === 0) {
-    return buildLaborDismissalWageFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildLaborDismissalWageFallback(primaryQuery, []),
+      'labor',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && cyberFraudScenario && contextChunks.length === 0) {
-    return buildCyberFraudFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildCyberFraudFallback(primaryQuery, []),
+      'crime',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && trafficInsuranceClaimScenario && contextChunks.length === 0) {
-    return buildTrafficInsuranceClaimFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildTrafficInsuranceClaimFallback(primaryQuery, []),
+      'contract',
+      primaryQuery,
+      [],
+    );
   }
 
   if (mode === 'qa' && phoneTheftScenario && contextChunks.length === 0) {
-    return buildPhoneTheftFallback(primaryQuery, []);
+    return ensureQaGenerationResultContract(
+      buildPhoneTheftFallback(primaryQuery, []),
+      'crime',
+      primaryQuery,
+      [],
+    );
   }
 
   // If no retrieved context, ask for missing facts instead of guessing law articles.
@@ -257,112 +375,108 @@ export async function generate(
 
   if (contextStrength === 'none') {
     if (mode === 'qa' && bankLoanOverdueScenario) {
-      return buildBankLoanOverdueFallback(primaryQuery, chunksForAnswer);
-    }
-    if (mode === 'qa' && consumerRefundScenario) {
-      return buildConsumerRefundFallback(primaryQuery, chunksForAnswer);
-    }
-    if (mode === 'qa' && laborDismissalOrWageScenario) {
-      return buildLaborDismissalWageFallback(primaryQuery, chunksForAnswer);
-    }
-    if (mode === 'qa' && publicNoiseScenario) {
-      return buildPublicNoiseFallback(chunksForAnswer);
-    }
-    if (mode === 'qa' && cyberFraudScenario) {
-      return buildCyberFraudFallback(primaryQuery, chunksForAnswer);
-    }
-    if (mode === 'qa' && trafficInsuranceClaimScenario) {
-      return buildTrafficInsuranceClaimFallback(primaryQuery, chunksForAnswer);
-    }
-    if (mode === 'qa' && phoneTheftScenario) {
-      return buildPhoneTheftFallback(primaryQuery, chunksForAnswer);
-    }
-    return buildWeakContextClarificationResult(mode, effectiveIntent, primaryQuery);
-  }
-
-  if (mode === 'qa' && publicNoiseScenario) {
-    return buildPublicNoiseFallback(chunksForAnswer);
-  }
-
-  if (mode === 'qa' && bankLoanOverdueScenario && contextStrength !== 'strong') {
-    return buildBankLoanOverdueFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && consumerRefundScenario) {
-    return buildConsumerRefundFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && laborDismissalOrWageScenario) {
-    return buildLaborDismissalWageFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && cyberFraudScenario) {
-    return buildCyberFraudFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && phoneTheftScenario) {
-    return buildPhoneTheftFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && trafficInsuranceClaimScenario) {
-    return buildTrafficInsuranceClaimFallback(primaryQuery, chunksForAnswer);
-  }
-
-  if (mode === 'qa' && trafficIncidentScenario && contextStrength !== 'strong') {
-    if (hasCanonicalIntentContext) {
-      const fallback = buildTrafficIncidentFallback(primaryQuery, chunksForAnswer);
-      const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
-      return {
-        answer: fallback.answer,
-        confidence: fallback.confidence,
-        promptTokens: 0,
-        completionTokens: 0,
-        mode: 'context',
-        suggestedQuestions: guidance.suggestedQuestions,
-      };
-    }
-
-    return buildWeakContextClarificationResult(mode, effectiveIntent, primaryQuery);
-  }
-
-  if (mode === 'qa' && broadIntentOverview && contextStrength !== 'strong') {
-    if (hasCanonicalIntentContext) {
-      const fallback = buildDetailedQaFallbackFromContext(
+      return ensureQaGenerationResultContract(
+        buildBankLoanOverdueFallback(primaryQuery, chunksForAnswer),
+        'contract',
         primaryQuery,
         chunksForAnswer,
-        effectiveIntent,
         allowedArticles,
       );
-      const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
-      return {
-        answer: fallback.answer,
-        confidence: fallback.confidence,
-        promptTokens: 0,
-        completionTokens: 0,
-        mode: 'context',
-        suggestedQuestions: guidance.suggestedQuestions,
-      };
     }
-
+    if (mode === 'qa' && consumerRefundScenario) {
+      return ensureQaGenerationResultContract(
+        buildConsumerRefundFallback(primaryQuery, chunksForAnswer),
+        'contract',
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
+    if (mode === 'qa' && laborDismissalOrWageScenario) {
+      return ensureQaGenerationResultContract(
+        buildLaborDismissalWageFallback(primaryQuery, chunksForAnswer),
+        'labor',
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
+    if (mode === 'qa' && publicNoiseScenario) {
+      return ensureQaGenerationResultContract(
+        buildPublicNoiseFallback(chunksForAnswer),
+        effectiveIntent,
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
+    if (mode === 'qa' && cyberFraudScenario) {
+      return ensureQaGenerationResultContract(
+        buildCyberFraudFallback(primaryQuery, chunksForAnswer),
+        'crime',
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
+    if (mode === 'qa' && trafficInsuranceClaimScenario) {
+      return ensureQaGenerationResultContract(
+        buildTrafficInsuranceClaimFallback(primaryQuery, chunksForAnswer),
+        'contract',
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
+    if (mode === 'qa' && phoneTheftScenario) {
+      return ensureQaGenerationResultContract(
+        buildPhoneTheftFallback(primaryQuery, chunksForAnswer),
+        'crime',
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
+    }
     return buildWeakContextClarificationResult(mode, effectiveIntent, primaryQuery);
   }
+
+  // Scenario-specific fallbacks are intentionally reserved for empty or unusable
+  // retrieval context. Once at least moderate context is available, the LLM is
+  // allowed to synthesize the answer so legal explanations stay topic-specific
+  // instead of collapsing into repeated deterministic templates.
 
   const hasOpenAIKey = Boolean(env.OPENAI_API_KEY?.trim());
   if (!hasOpenAIKey) {
     if (mode === 'qa' && broadIntentOverview && hasCanonicalIntentContext) {
       const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
-      return {
-        answer: guidance.answer,
-        confidence: guidance.confidence,
-        promptTokens: 0,
-        completionTokens: 0,
-        mode: 'fallback-general',
-        suggestedQuestions: guidance.suggestedQuestions,
-      };
+      return ensureQaGenerationResultContract(
+        {
+          answer: guidance.answer,
+          confidence: guidance.confidence,
+          promptTokens: 0,
+          completionTokens: 0,
+          mode: 'fallback-general',
+          suggestedQuestions: guidance.suggestedQuestions,
+        },
+        effectiveIntent,
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
     }
 
-    if (mode === 'qa' && effectiveIntent === 'labor' && /баримт|бүрдүүл|нотлох|нотолгоо|ямар/i.test(primaryQuery)) {
-      return buildLaborDocumentChecklistFallback();
+    if (
+      mode === 'qa' &&
+      effectiveIntent === 'labor' &&
+      /баримт|бүрдүүл|нотлох|нотолгоо|ямар/i.test(primaryQuery)
+    ) {
+      return ensureQaGenerationResultContract(
+        buildLaborDocumentChecklistFallback(),
+        effectiveIntent,
+        primaryQuery,
+        chunksForAnswer,
+        allowedArticles,
+      );
     }
 
     const fallback = buildModeFallbackFromContext(
@@ -372,14 +486,29 @@ export async function generate(
       intentLawHint,
       allowedArticles,
     );
-    return {
-      answer: fallback.answer,
-      confidence: fallback.confidence,
-      promptTokens: 0,
-      completionTokens: 0,
-      mode: 'context',
-      suggestedQuestions: [],
-    };
+    return mode === 'qa' && !useFollowUpFreeform
+      ? ensureQaGenerationResultContract(
+          {
+            answer: fallback.answer,
+            confidence: fallback.confidence,
+            promptTokens: 0,
+            completionTokens: 0,
+            mode: 'context',
+            suggestedQuestions: [],
+          },
+          effectiveIntent,
+          primaryQuery,
+          chunksForAnswer,
+          allowedArticles,
+        )
+      : {
+          answer: fallback.answer,
+          confidence: fallback.confidence,
+          promptTokens: 0,
+          completionTokens: 0,
+          mode: 'context',
+          suggestedQuestions: [],
+        };
   }
 
   const openai = getOpenAIClient(env.OPENAI_API_KEY, env.OPENAI_TIMEOUT_MS);
@@ -392,11 +521,60 @@ export async function generate(
   const maxHistory = GENERATION_CONFIG.MAX_HISTORY_MESSAGES;
   const trimmedHistory = history.slice(-maxHistory);
 
+  const subIntentDirective =
+    options.detailSubIntent && options.detailSubIntent !== 'general'
+      ? SUB_INTENT_DIRECTIVES[options.detailSubIntent]
+      : '';
+
+  const systemPrompt = useFollowUpFreeform
+    ? `${FOLLOW_UP_FREEFORM_SYSTEM_PROMPT}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}${
+        subIntentDirective ? `\n\nFOLLOW-UP ФОКУС:\n${subIntentDirective}` : ''
+      }`
+    : `${buildSystemPrompt(mode)}\n\n${QUALITY_FIRST_SYSTEM_APPENDIX}\n\n${STRICT_QA_GENERATION_CONTRACT}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}${
+        subIntentDirective ? `\n\n${subIntentDirective}` : ''
+      }`;
+
+  const userPrompt = useFollowUpFreeform
+    ? `ЭНЭ БОЛ ӨМНӨХ СЭДВИЙН ҮРГЭЛЖЛЭЛ АСУУЛТ.
+
+Өмнөх яриа болон доорх эх сурвалжийг ашиглаад хэрэглэгчийн одоогийн асуултад шууд хариул.
+Үндсэн QA template-ийг давтахгүй. Шинэ retrieval хийсэн мэт хууль нэмж таахгүй.
+
+ГОЛ ЛАВЛАХ ЗААЛТУУД:
+${contextReferenceGuide}
+
+КОНТЕКСТ (өмнөх retrieval/source):
+
+${contextBlock}
+
+---
+
+ХАРИУЛТЫН РЕЖИМ: FOLLOW_UP_FREEFORM
+АСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}
+КОНТЕКСТ ЧАНАР: ${contextStrength}
+ОДООГИЙН FOLLOW-UP АСУУЛТ: ${primaryQuery}`
+    : `ОДООГИЙН АСУУЛТАД ХАРИУЛ. Өмнөх яриа байгаа бол зөвхөн холбоотой үед туслах контекст гэж үз.
+
+ГОЛ ЛАВЛАХ ЗААЛТУУД:
+${contextReferenceGuide}
+
+КОНТЕКСТ (эх сурвалжууд):
+
+${contextBlock}
+
+---
+
+ХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}
+АСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}
+КОНТЕКСТ ЧАНАР: ${contextStrength}
+ЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}
+ОДООГИЙН АСУУЛТ: ${primaryQuery}`;
+
   // Build messages array
   const messages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
-      content: `${buildSystemPrompt(mode)}\n\n${COURT_PRACTICE_SYSTEM_APPENDIX}`,
+      content: systemPrompt,
     },
     // Conversation history
     ...trimmedHistory.map(
@@ -408,7 +586,7 @@ export async function generate(
     // Current query with context
     {
       role: 'user',
-      content: `ГОЛ ЛАВЛАХ ЗААЛТУУД:\n${contextReferenceGuide}\n\nКОНТЕКСТ (эх сурвалжууд):\n\n${contextBlock}\n\n---\n\nХАРИУЛТЫН РЕЖИМ: ${mode.toUpperCase()}\nАСУУЛТЫН САЛБАР: ${intentLawHint || 'Тодорхойгүй'}\nКОНТЕКСТ ЧАНАР: ${contextStrength}\nЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${allowedArticles.length > 0 ? allowedArticles.map((num) => `${num} зүйл`).join(', ') : 'Байхгүй'}\nАСУУЛТ: ${primaryQuery}`,
+      content: userPrompt,
     },
   ];
 
@@ -437,37 +615,61 @@ export async function generate(
       intentLawHint,
       allowedArticles,
     );
-    return {
-      answer: fallback.answer,
-      confidence: fallback.confidence,
-      promptTokens: 0,
-      completionTokens: 0,
-      mode: 'context',
-      suggestedQuestions: [],
-    };
+    return mode === 'qa'
+      ? ensureQaGenerationResultContract(
+          {
+            answer: fallback.answer,
+            confidence: fallback.confidence,
+            promptTokens: 0,
+            completionTokens: 0,
+            mode: 'context',
+            suggestedQuestions: [],
+          },
+          effectiveIntent,
+          primaryQuery,
+          chunksForAnswer,
+          allowedArticles,
+        )
+      : {
+          answer: fallback.answer,
+          confidence: fallback.confidence,
+          promptTokens: 0,
+          completionTokens: 0,
+          mode: 'context',
+          suggestedQuestions: [],
+        };
   }
 
   // Parse suggested questions, then confidence
   const { text: textWithoutQuestions, questions: suggestedQuestions } =
     parseSuggestedQuestions(text);
+  let finalSuggestedQuestions = suggestedQuestions;
   const { answer, confidence } = parseConfidence(textWithoutQuestions);
   const grounded = enforceArticleGrounding(answer, allowedArticles, mode);
   let finalAnswer = grounded.answer;
   let finalConfidence = grounded.adjusted ? Math.min(confidence, 0.74) : confidence;
 
+  // Safety net for detail follow-ups asking "ямар баримт бүрдүүлэх вэ?". When
+  // the LLM does not produce a strong document checklist (too short, too few
+  // bullets, missing key terms), fall back to the deterministic checklist for
+  // the active intent so the user always receives an actionable list instead of
+  // a vague restatement of the prior answer.
   if (
     mode === 'qa' &&
+    !useFollowUpFreeform &&
+    options.detailSubIntent === 'documents' &&
     finalAnswer.trim() !== NO_INFO_RESPONSE &&
-    shouldForceDetailedQaAnswer(finalAnswer)
+    isWeakDocumentChecklistAnswer(finalAnswer)
   ) {
-    const fallback = buildDetailedQaFallbackFromContext(
+    const checklist = ensureQaGenerationResultContract(
+      buildDocumentChecklistByIntent(effectiveIntent),
+      effectiveIntent,
       primaryQuery,
       chunksForAnswer,
-      effectiveIntent,
       allowedArticles,
     );
-    finalAnswer = fallback.answer;
-    finalConfidence = Math.min(finalConfidence, fallback.confidence);
+    finalAnswer = checklist.answer;
+    finalConfidence = Math.max(finalConfidence, checklist.confidence);
   }
 
   const groundedText = finalAnswer.trim().toLowerCase();
@@ -480,21 +682,22 @@ export async function generate(
   ) {
     if (mode === 'qa' && trafficIncidentScenario) {
       if (hasCanonicalIntentContext) {
-        const fallback = buildDetailedQaFallbackFromContext(
+        const fallback = buildTrafficIncidentFallback(primaryQuery, chunksForAnswer);
+        const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
+        return ensureQaGenerationResultContract(
+          {
+            answer: fallback.answer,
+            confidence: fallback.confidence,
+            promptTokens,
+            completionTokens,
+            mode: 'context',
+            suggestedQuestions: guidance.suggestedQuestions,
+          },
+          effectiveIntent,
           primaryQuery,
           chunksForAnswer,
-          effectiveIntent,
           allowedArticles,
         );
-        const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
-        return {
-          answer: fallback.answer,
-          confidence: fallback.confidence,
-          promptTokens,
-          completionTokens,
-          mode: 'context',
-          suggestedQuestions: guidance.suggestedQuestions,
-        };
       }
 
       const fallback = buildWeakContextClarificationResult(mode, effectiveIntent, primaryQuery);
@@ -508,14 +711,20 @@ export async function generate(
     if (mode === 'qa' && broadIntentOverview) {
       if (hasCanonicalIntentContext) {
         const guidance = buildIntentGuidanceFallback(effectiveIntent, primaryQuery);
-        return {
-          answer: guidance.answer,
-          confidence: guidance.confidence,
-          promptTokens,
-          completionTokens,
-          mode: 'fallback-general',
-          suggestedQuestions: guidance.suggestedQuestions,
-        };
+        return ensureQaGenerationResultContract(
+          {
+            answer: guidance.answer,
+            confidence: guidance.confidence,
+            promptTokens,
+            completionTokens,
+            mode: 'fallback-general',
+            suggestedQuestions: guidance.suggestedQuestions,
+          },
+          effectiveIntent,
+          primaryQuery,
+          chunksForAnswer,
+          allowedArticles,
+        );
       }
 
       const fallback = buildWeakContextClarificationResult(mode, effectiveIntent, primaryQuery);
@@ -539,14 +748,247 @@ export async function generate(
   finalAnswer = cleanupAnswerStructure(finalAnswer);
   finalAnswer = ensureLegalLinksInAnswer(finalAnswer, primaryQuery, chunksForAnswer);
 
+  // Self-critique safety net: if deterministic cleanup left OCR or off-topic
+  // leakage in place we ask the LLM to rewrite the answer once. This is a
+  // belt-and-braces fallback — most cases are already handled by stripOcrLeakage
+  // and matchesIntentInCorpus.
+  if (hasOcrOrInternalLeakage(finalAnswer)) {
+    const rewritten = await runSelfCritique(env, primaryQuery, finalAnswer);
+    if (rewritten) {
+      const cleanedRewrite = ensureLegalLinksInAnswer(
+        cleanupAnswerStructure(rewritten),
+        primaryQuery,
+        chunksForAnswer,
+      );
+      if (!hasOcrOrInternalLeakage(cleanedRewrite)) {
+        finalAnswer = cleanedRewrite;
+        finalConfidence = Math.min(finalConfidence, 0.7);
+      }
+    }
+  }
+
+  if (mode === 'qa' && !useFollowUpFreeform && finalAnswer.trim() !== NO_INFO_RESPONSE) {
+    let qualityReport = validateQaAnswerQuality(finalAnswer);
+    if (!qualityReport.ok || shouldForceDetailedQaAnswer(finalAnswer)) {
+      const repaired = await repairWeakQaAnswer({
+        env,
+        query: primaryQuery,
+        draft: finalAnswer,
+        chunks: chunksForAnswer,
+        intent: effectiveIntent,
+        allowedArticles,
+        issues: qualityReport.issues,
+      });
+
+      if (repaired) {
+        promptTokens += repaired.promptTokens;
+        completionTokens += repaired.completionTokens;
+
+        const { text: repairedWithoutQuestions, questions: repairedQuestions } =
+          parseSuggestedQuestions(repaired.text);
+        const { answer: repairedAnswer, confidence: repairedConfidence } =
+          parseConfidence(repairedWithoutQuestions);
+        const repairedGrounded = enforceArticleGrounding(repairedAnswer, allowedArticles, mode);
+        const cleanedRepair = ensureLegalLinksInAnswer(
+          cleanupAnswerStructure(repairedGrounded.answer),
+          primaryQuery,
+          chunksForAnswer,
+        );
+
+        if (cleanedRepair && !hasOcrOrInternalLeakage(cleanedRepair)) {
+          finalAnswer = cleanedRepair;
+          finalConfidence = Math.min(
+            Math.max(finalConfidence, repairedConfidence),
+            repairedGrounded.adjusted ? 0.74 : 0.86,
+          );
+          if (repairedQuestions.length > 0) {
+            finalSuggestedQuestions = repairedQuestions;
+          }
+        }
+      }
+
+      qualityReport = validateQaAnswerQuality(finalAnswer);
+      if (!qualityReport.ok || shouldForceDetailedQaAnswer(finalAnswer)) {
+        const fallback = buildDetailedQaFallbackFromContext(
+          primaryQuery,
+          chunksForAnswer,
+          effectiveIntent,
+          allowedArticles,
+        );
+        finalAnswer = ensureLegalLinksInAnswer(
+          cleanupAnswerStructure(fallback.answer),
+          primaryQuery,
+          chunksForAnswer,
+        );
+        finalConfidence = Math.min(finalConfidence, fallback.confidence);
+      }
+    }
+  }
+
+  finalAnswer = appendLegalInformationDisclaimer(finalAnswer, mode);
+
   return {
     answer: finalAnswer,
     confidence: finalConfidence,
     promptTokens,
     completionTokens,
     mode: 'context',
-    suggestedQuestions,
+    suggestedQuestions: finalSuggestedQuestions,
   };
+}
+
+const SELF_CRITIQUE_SYSTEM_PROMPT = `Та өмнөх хариултыг шалгаж, цэвэрлэдэг хуулийн редактор. Дараах алдаа байвал засаж бүтэн хариултыг буцаа:
+1. "Хууль: <НЭР> Зүйл: <тоо> <ТОМ ҮСЭГТ ГАРЧИГ>" гэх OCR/түүхий текст хуулсан байвал хас.
+2. Асуултад огт хамаагүй заалт (жишээ: зам тээврийн ослын асуултад "мөнгө угаах", "хүн худалдаалах", "терроризм") байвал хас.
+3. "LLM үйлчилгээ түр боломжгүй", "Доорх контекстээс олдсон", "retrieval", "score", "chunk" зэрэг дотоод үг байвал хас.
+4. Бүтэц нь Зөвлөгөө → Яг одоо хийх алхам → Хуулийн тайлбар → Анхаарах эрсдэл → Практик зөвлөгөө хэлбэртэй байна.
+5. "Зөвлөгөө" дор хаяж 2 өгүүлбэр, "Яг одоо хийх алхам" дор хаяж 5 numbered алхам, "Хуулийн тайлбар" дор хаяж 5 өгүүлбэр, "Анхаарах эрсдэл" дор хаяж 2 өгүүлбэр, "Практик зөвлөгөө" дор хаяж 4 bullet байна.
+6. "Хуулийн үндэслэл", "Хуулийн заалт: 11, 83..." гэх хуурай жагсаалт хэрэглэж болохгүй.
+Эдгээр алдаа байхгүй бол хариултыг яг тэр хэвээр нь буцаа. Шинэ зүйл, заалт нэмж зохиохгүй.`;
+
+async function runSelfCritique(env: AppEnv, query: string, draft: string): Promise<string | null> {
+  if (!env.OPENAI_API_KEY?.trim()) {
+    return null;
+  }
+
+  try {
+    const openai = getOpenAIClient(env.OPENAI_API_KEY, env.OPENAI_TIMEOUT_MS);
+    const response = await chatCompletion(
+      openai,
+      [
+        { role: 'system', content: SELF_CRITIQUE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `АСУУЛТ: ${query}\n\nОДООГИЙН ХАРИУЛТ:\n${draft}\n\nДээрх дүрмээр шалгаж засаад бүтэн хариултыг буцаа.`,
+        },
+      ],
+      {
+        model: env.OPENAI_CHAT_MODEL,
+        temperature: 0.1,
+        maxTokens: GENERATION_CONFIG.MAX_RESPONSE_TOKENS,
+      },
+    );
+
+    const text = response.text?.trim() ?? '';
+    return text.length > 0 ? text : null;
+  } catch (error) {
+    console.warn(
+      `[generation] self-critique failed (${error instanceof Error ? error.message : String(error)})`,
+    );
+    return null;
+  }
+}
+
+type QaRepairResult = {
+  text: string;
+  promptTokens: number;
+  completionTokens: number;
+};
+
+async function repairWeakQaAnswer(params: {
+  env: AppEnv;
+  query: string;
+  draft: string;
+  chunks: ChromaQueryResult[];
+  intent: QueryIntent;
+  allowedArticles: string[];
+  issues: string[];
+}): Promise<QaRepairResult | null> {
+  const { env, query, draft, chunks, intent, allowedArticles, issues } = params;
+  if (!env.OPENAI_API_KEY?.trim()) {
+    return null;
+  }
+
+  try {
+    const openai = getOpenAIClient(env.OPENAI_API_KEY, env.OPENAI_TIMEOUT_MS);
+    const contextReferenceGuide = buildContextReferenceGuide(query, chunks);
+    const contextBlock = buildContextBlock(query, chunks, []);
+    const response = await chatCompletion(
+      openai,
+      [
+        {
+          role: 'system',
+          content: `Та Монгол Улсын хуулийн чанарын редактор. Доорх draft хариултыг хэрэглэгчид ойлгомжтой, хуульчийн тайлбар хэлбэртэй бүтэн QA хариулт болгон ДАХИН БИЧ.
+
+ЗААВАЛ БҮТЭЦ:
+**Зөвлөгөө**
+- Дор хаяж 2 бүтэн өгүүлбэр.
+
+**Яг одоо хийх алхам**
+- Заавал 1-ээс эхэлсэн дор хаяж 5 numbered action step.
+
+**Хуулийн тайлбар**
+- Дор хаяж 5 бүтэн өгүүлбэр.
+- "Хууль: ... Зүйл: ..." raw text бүү хуул.
+- Хуулийн дугаар, citation chip ашиглаж болно, гэхдээ заавал тухайн хэрэглэгчийн нөхцөлд яагаад хамаарахыг хүний хэлээр тайлбарла.
+
+**Анхаарах эрсдэл**
+- Дор хаяж 2 бүтэн өгүүлбэр.
+
+**Практик зөвлөгөө**
+- Дор хаяж 4 bullet зөвлөгөө.
+
+ХОРИГЛОХ:
+- "Хуулийн үндэслэл" гарчиг.
+- "Хуулийн заалт: 11, 83, 4..." гэх хуурай жагсаалт.
+- "retrieval", "chunk", "score", "context", "LLM үйлчилгээ түр боломжгүй" гэх системийн үг.
+- Хамааралгүй хууль, зүйл зохиох.
+
+Эх сурвалжид байхгүй зүйл, хугацаа, торгуулийн хэмжээг бүү зохио. Хэрэв тодорхой бус бол баримтаа бичгээр тодруулах шаардлагатай гэж энгийнээр тайлбарла.
+
+Төгсгөлд:
+CONFIDENCE: X.XX
+SUGGESTED_QUESTIONS:
+- ...
+- ...
+- ...`,
+        },
+        {
+          role: 'user',
+          content: `АСУУЛТ: ${query}
+АСУУЛТЫН САЛБАР: ${intent}
+ЗАСАХ ШАЛТГААН: ${issues.join(', ') || 'quality_contract_failed'}
+ЗӨВШӨӨРӨГДСӨН ЗҮЙЛИЙН ДУГААР: ${
+            allowedArticles.length > 0
+              ? allowedArticles.map((article) => `${article} зүйл`).join(', ')
+              : 'Контекстээс баталгаатай зүйл тодорхойгүй'
+          }
+
+ГОЛ ЛАВЛАХ ЗААЛТУУД:
+${contextReferenceGuide}
+
+КОНТЕКСТ:
+${contextBlock}
+
+ОДООГИЙН СУЛ DRAFT:
+${draft}
+
+Дээрх draft-ийг бүрэн дахин бич. Хэрэглэгчид шууд уншигдах final answer л буцаа.`,
+        },
+      ],
+      {
+        model: env.OPENAI_CHAT_MODEL,
+        temperature: 0.15,
+        maxTokens: GENERATION_CONFIG.MAX_RESPONSE_TOKENS,
+      },
+    );
+
+    const text = response.text?.trim() ?? '';
+    if (!text) {
+      return null;
+    }
+
+    return {
+      text,
+      promptTokens: response.promptTokens,
+      completionTokens: response.completionTokens,
+    };
+  } catch (error) {
+    console.warn(
+      `[generation] qa repair failed (${error instanceof Error ? error.message : String(error)})`,
+    );
+    return null;
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -559,13 +1001,529 @@ function shouldForceDetailedQaAnswer(answer: string): boolean {
   const wordCount = cleaned ? cleaned.split(' ').length : 0;
   const sectionCount = (answer.match(/(?:^|\n)\s*(?:\d+\.|\*\*[^*]+\*\*)/g) ?? []).length;
   const hasPracticalTips = /Практик\s+зөвлөгөө/i.test(answer);
+  const hasInternalOrRawDump = hasOcrOrInternalLeakage(answer);
 
-  return wordCount < 180 || sectionCount < 3 || !hasPracticalTips;
+  const isSeverelyUnderdeveloped = wordCount < 90;
+  const isEffectivelyUnstructured = sectionCount < 2 && !hasPracticalTips;
+
+  return hasInternalOrRawDump || isSeverelyUnderdeveloped || isEffectivelyUnstructured;
+}
+
+type QaAnswerSections = {
+  advice: string;
+  actions: string;
+  lawExplanation: string;
+  risks: string;
+  practicalTips: string;
+};
+
+export interface QaAnswerQualityReport {
+  ok: boolean;
+  issues: string[];
+  metrics: {
+    adviceSentences: number;
+    actionSteps: number;
+    lawExplanationSentences: number;
+    riskSentences: number;
+    practicalTips: number;
+  };
+}
+
+function normalizeQaHeading(line: string): keyof QaAnswerSections | null {
+  const normalized = line
+    .trim()
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^\*\*/, '')
+    .replace(/\*\*$/, '')
+    .replace(/[:：]\s*$/, '')
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^зөвлөгөө$/.test(normalized)) {
+    return 'advice';
+  }
+
+  if (/^(яг\s+одоо\s+хийх\s+алхам|яаралтай\s+авах\s+арга\s+хэмжээ|яг\s+одоо\s+бүрдүүлэх\s+баримт|бүрдүүлэх\s+баримт)/i.test(normalized)) {
+    return 'actions';
+  }
+
+  if (/^(хуулийн\s+тайлбар|хуулийн\s+үндэслэл|холбогдох\s+хуулийн\s+үндэслэл|хуулийн\s+заалт)/i.test(normalized)) {
+    return 'lawExplanation';
+  }
+
+  if (/^(анхаарах\s+эрсдэл|анхаарах\s+зүйл|эрсдэл)/i.test(normalized)) {
+    return 'risks';
+  }
+
+  if (/^практик\s+зөвлөгөө/i.test(normalized)) {
+    return 'practicalTips';
+  }
+
+  return null;
+}
+
+function extractQaAnswerSections(answer: string): QaAnswerSections {
+  const sections: QaAnswerSections = {
+    advice: '',
+    actions: '',
+    lawExplanation: '',
+    risks: '',
+    practicalTips: '',
+  };
+  let current: keyof QaAnswerSections = 'advice';
+  let sawHeading = false;
+
+  for (const line of answer.split('\n')) {
+    const trimmed = line.trim();
+    if (/^(CONFIDENCE|SUGGESTED_QUESTIONS)\s*:/i.test(trimmed)) {
+      break;
+    }
+
+    const heading = normalizeQaHeading(trimmed);
+    if (heading) {
+      current = heading;
+      sawHeading = true;
+      continue;
+    }
+
+    if (!sawHeading && trimmed.length === 0) {
+      continue;
+    }
+
+    sections[current] = `${sections[current]}${sections[current] ? '\n' : ''}${line}`;
+  }
+
+  return sections;
+}
+
+function stripMarkdownForCounting(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/^[\s>*-]+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countSentences(text: string): number {
+  const cleaned = stripMarkdownForCounting(text);
+  if (!cleaned) {
+    return 0;
+  }
+
+  const sentenceMatches = cleaned.match(/[^.!?。！？]+[.!?。！？]+/gu) ?? [];
+  if (sentenceMatches.length > 0) {
+    return sentenceMatches.length;
+  }
+
+  return cleaned.length >= 40 ? 1 : 0;
+}
+
+function extractNumberedOrBulletItems(section: string): string[] {
+  const items: string[] = [];
+  for (const line of section.split('\n')) {
+    const trimmed = line.trim();
+    const numbered = trimmed.match(/^\d+\.\s+(.+)/);
+    const bullet = trimmed.match(/^[-*]\s+(.+)/);
+    const value = numbered?.[1] ?? bullet?.[1];
+    if (value?.trim()) {
+      items.push(value.trim());
+    }
+  }
+  return items;
+}
+
+function countNumberedActionSteps(section: string): number {
+  return (section.match(/^\s*\d+\.\s+\S/gm) ?? []).length;
+}
+
+function countPracticalTips(section: string): number {
+  return (section.match(/^\s*[-*]\s+\S/gm) ?? []).length;
+}
+
+function hasDryReferenceLeakage(answer: string): boolean {
+  return (
+    /Хуулийн\s+заалт\s*[:：]\s*(?:\d+[\s,]*){2,}/iu.test(answer) ||
+    /Хууль\s*[:：]\s*[^.\n]{3,200}?\s+Зүйл\s*[:：]/iu.test(answer) ||
+    /(?:^|\n)\s*\d+\s*\n\s*(?:Зөвлөгөө|Яг одоо хийх алхам|Хуулийн тайлбар|Анхаарах эрсдэл)/iu.test(
+      answer,
+    )
+  );
+}
+
+function isDryLawExplanation(section: string): boolean {
+  const stripped = stripMarkdownForCounting(section);
+  if (!stripped) {
+    return true;
+  }
+
+  if (/Хуулийн\s+заалт\s*[:：]|Хууль\s*[:：]\s*.*Зүйл\s*[:：]/iu.test(section)) {
+    return true;
+  }
+
+  const nonEmptyLines = section.split('\n').map((line) => line.trim()).filter(Boolean);
+  const bulletCitationLines = nonEmptyLines.filter((line) => /^[-*]?\s*\[[^\]]+\]\([^)]+\)/.test(line));
+  return nonEmptyLines.length > 0 && bulletCitationLines.length === nonEmptyLines.length;
+}
+
+export function validateQaAnswerQuality(answer: string): QaAnswerQualityReport {
+  const sections = extractQaAnswerSections(answer);
+  const metrics = {
+    adviceSentences: countSentences(sections.advice),
+    actionSteps: countNumberedActionSteps(sections.actions),
+    lawExplanationSentences: countSentences(sections.lawExplanation),
+    riskSentences: countSentences(sections.risks),
+    practicalTips: countPracticalTips(sections.practicalTips),
+  };
+  const issues: string[] = [];
+
+  if (!sections.advice.trim()) issues.push('missing_advice');
+  if (!sections.actions.trim()) issues.push('missing_actions');
+  if (!sections.lawExplanation.trim()) issues.push('missing_law_explanation');
+  if (!sections.risks.trim()) issues.push('missing_risks');
+  if (!sections.practicalTips.trim()) issues.push('missing_practical_tips');
+  if (metrics.adviceSentences < 2) issues.push('short_advice');
+  if (metrics.actionSteps < 5) issues.push('too_few_action_steps');
+  if (metrics.lawExplanationSentences < 5) issues.push('short_law_explanation');
+  if (metrics.riskSentences < 2) issues.push('short_risks');
+  if (metrics.practicalTips < 4) issues.push('too_few_practical_tips');
+  if (hasOcrOrInternalLeakage(answer) || hasDryReferenceLeakage(answer)) issues.push('raw_or_internal_leakage');
+  if (isDryLawExplanation(sections.lawExplanation)) issues.push('dry_law_reference_list');
+  if (/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?Хуулийн\s+(?:үндэслэл|заалт)(?:\*\*)?\s*[:：]?\s*$/imu.test(answer)) {
+    issues.push('old_law_basis_heading');
+  }
+
+  return { ok: issues.length === 0, issues, metrics };
+}
+
+function appendUniqueItems(base: string[], additions: string[], minCount: number): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of [...base, ...additions]) {
+    const normalized = normalizeForMatch(item).replace(/\s+/g, ' ').trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(item.trim().replace(/\s+/g, ' '));
+    if (result.length >= minCount) {
+      break;
+    }
+  }
+  return result;
+}
+
+function genericActionStepAdditions(): string[] {
+  return [
+    'Холбогдох бүх баримтыг огнооны дарааллаар нэг хавтаст нэгтгэж, эх хувь болон хуулбарыг тусад нь хадгална.',
+    'Нөгөө тал эсвэл холбогдох байгууллагад шаардлага, хүсэлтээ амаар биш бичгээр өгч, хүлээн авсан баримтыг үлдээнэ.',
+    'Хариу өгөх тодорхой хугацаа зааж, хугацаа дуусахад дараагийн шатны байгууллага эсвэл шүүхэд хандах бэлтгэлээ хийнэ.',
+    'Мөнгөн шаардлага байгаа бол үндсэн төлбөр, хүү, алданги, хохирол, нэмэлт зардлыг тус тусад нь тооцож бичнэ.',
+    'Имэйл, чат, мессеж, зураг, видео зэрэг цахим нотолгоог устгахгүйгээр эх хэлбэрээр нь хадгалж, шаардлагатай бол хэвлэж хавсаргана.',
+  ];
+}
+
+function ensureMinimumActionSteps(existingSection: string, intent: QueryIntent, query: string): string[] {
+  const existingItems = extractNumberedOrBulletItems(existingSection);
+  const intentItems = buildQaActionSteps(intent, query);
+  return appendUniqueItems(existingItems, [...intentItems, ...genericActionStepAdditions()], 5);
+}
+
+function genericPracticalTipAdditions(): string[] {
+  return [
+    'Гол баримтуудаа эх хувиар нь хадгалж, шүүх эсвэл байгууллагад өгөхдөө хуулбар хавсарга.',
+    'Албан харилцаанд огноо, шаардлага, хариу өгөх хугацааг тодорхой бич.',
+    'Аман тохиролцоонд дангаар нь найдахгүй, бүх тохиролцоо болон татгалзлыг бичгээр баталгаажуул.',
+    'Маргаан хүндрэх шинжтэй бол баримтаа бүрдүүлсний дараа мэргэшсэн хуульчаас урьдчилан зөвлөгөө ав.',
+  ];
+}
+
+function ensureMinimumPracticalTips(existingSection: string, intent: QueryIntent, query: string): string[] {
+  const existingItems = extractNumberedOrBulletItems(existingSection);
+  const intentItems = buildQaPracticalTips(intent, query);
+  return appendUniqueItems(existingItems, [...intentItems, ...genericPracticalTipAdditions()], 4);
+}
+
+function ensureAdviceText(existing: string, intent: QueryIntent, query: string): string {
+  const cleaned = stripMarkdownForCounting(existing);
+  const base = cleaned.length > 0 ? cleaned : buildQaOpeningAdvice(intent, query);
+  if (countSentences(base) >= 2) {
+    return base;
+  }
+
+  const addition =
+    intent === 'labor'
+      ? 'Ийм үед тушаал, гэрээ, цалингийн баримт зэрэг бичгийн нотолгоо таны шаардлагын үндсэн тулгуур болно.'
+      : intent === 'traffic'
+        ? 'Ийм үед ослын газар дээрх баримт, цагдаагийн бүртгэл, даатгалын мэдэгдэл гурвыг алдахгүй бүрдүүлэх нь хамгийн чухал.'
+        : intent === 'contract'
+          ? 'Ийм үед гэрээ, төлбөрийн баримт, бичгээр өгсөн шаардлага, хариу нь маргааны гол нотолгоо болдог.'
+          : 'Иймд эхлээд баримтаа бүрдүүлж, дараа нь шаардлагаа бичгээр тодорхой гаргах нь зөв.';
+  return `${base.replace(/[.!?。！？]*$/u, '.')} ${addition}`;
+}
+
+function intentLawExplanationAdditions(intent: QueryIntent, query: string): string[] {
+  if (intent === 'labor') {
+    return [
+      'Ажил олгогч хөдөлмөрийн харилцааг дуусгавар болгохдоо хуульд заасан үндэслэл, журам, бичгийн шийдвэр, тооцоог нотлох үүрэгтэй.',
+      'Ажлаас халсан тушаалын огноо, үндэслэл, ажилтанд гардуулсан байдал нь маргаан шийдвэрлэхэд шууд ач холбогдолтой.',
+      'Цалин, олговор, ажилгүй байсан хугацааны нөхөн төлбөрийг шаардах эсэх нь ажилласан хугацаа, цалингийн баримт, ажил олгогчийн шийдвэр хууль ёсны байсан эсэхээс хамаарна.',
+    ];
+  }
+
+  if (intent === 'traffic') {
+    return [
+      'Зам тээврийн ослын үед жолоочийн ослын дараах үүрэг, цагдаад мэдэгдэх ажиллагаа, хохирол тогтоох баримтжуулалт хамтад нь үнэлэгдэнэ.',
+      'Хүн гэмтсэн эсэх, согтууруулах ундаа хэрэглэсэн эсэх, ослын газраас явсан эсэх, хохирлын хэмжээ зэрэг нь зөрчил эсвэл эрүүгийн хариуцлагын заагийг тодорхойлдог.',
+      'Даатгалын нөхөн төлбөр авахад ослын акт, зураг, үнэлгээ, даатгалд мэдэгдсэн хугацаа зэрэг нь хууль зүйн чухал баримт болно.',
+    ];
+  }
+
+  if (intent === 'contract') {
+    const isLoan = isBankLoanQuery(query) || isContractDebtBankLoanQuery(query);
+    return isLoan
+      ? [
+          'Зээлийн харилцаанд төлбөр хугацаандаа төлөгдөөгүй бол эхлээд иргэний эрх зүйн үүргийн зөрчил гэж үнэлэгддэг.',
+          'Банк ямар нэмэлт төлбөр шаардах нь зээлийн гэрээ, хүү, нэмэгдүүлсэн хүү, алданги, барьцааны нөхцөл хуульд нийцсэн эсэхээс хамаарна.',
+          'Барьцаатай зээлийн хувьд банк барьцаа хэрэгжүүлэхээс өмнө мэдэгдэл, тооцоо, шаардлагын дарааллыг гэрээ болон хуульд нийцүүлсэн эсэхийг шалгах хэрэгтэй.',
+        ]
+      : [
+          'Гэрээний маргаанд талууд яг юу тохирсон, ямар хугацаа тогтоосон, ямар үүрэг зөрчигдсөн, ямар хохирол үүссэн гэдгийг баримтаар шалгана.',
+          'Нэхэмжлэл гаргахдаа үндсэн шаардлага, хохирлын тооцоо, алданги эсвэл торгуулийн үндэслэлийг тус тусад нь тодорхойлох шаардлагатай.',
+          'Аман тохиролцоог нотлоход хүндрэлтэй тул бичгээр өгсөн шаардлага, төлбөрийн баримт, мессеж, имэйл зэрэг нотолгоо чухал болно.',
+        ];
+  }
+
+  if (intent === 'crime') {
+    return [
+      'Эрүүгийн шинжтэй асуудалд хамгийн түрүүнд болсон үйл явдал, хохирол, буруутай байж болзошгүй этгээд, нотлох баримтыг бүртгүүлж шалгуулна.',
+      'Цагдаад өгсөн гомдол, шилжүүлгийн баримт, чат, зураг, гэрчийн мэдээлэл зэрэг нь мөрдөн шалгах ажиллагааны эхний суурь болдог.',
+      'Гэмт хэрэг мөн эсэх, эсвэл иргэний маргаан уу гэдгийг мөрдөн шалгах байгууллага баримтад тулгуурлан ялгаж тогтооно.',
+    ];
+  }
+
+  return [
+    'Энэ төрлийн асуудалд зөв хууль хэрэглэхийн тулд бодит үйл баримт, хугацаа, бичгийн нотолгоо, хандах байгууллага зэргийг хамтад нь үнэлнэ.',
+    'Хуулийн заалт дангаараа хангалтгүй тул тухайн заалт таны нөхцөлд ямар эрх, үүрэг, шаардлага, эрсдэл үүсгэхийг баримттай нь тулгах хэрэгтэй.',
+    'Иймээс эхлээд нотлох баримтаа эмхэлж, дараа нь шаардлагаа бичгээр гаргах дараалал хамгийн найдвартай байдаг.',
+  ];
+}
+
+function buildReferenceExplanationSentence(ref: QaReference, intent: QueryIntent): string {
+  const label = ref.shortLabel ? `${ref.shortLabel}` : 'энэ асуудлын эрх, үүргийг тодруулах зохицуулалт';
+  const application =
+    intent === 'labor'
+      ? 'ажил олгогчийн шийдвэр хууль ёсны эсэх, ажилтны шаардлага ямар баримтаар нотлогдохыг шалгахад хэрэглэгдэнэ'
+      : intent === 'traffic'
+        ? 'ослын дараах үүрэг, хохирол тогтоох дараалал, даатгал болон хариуцлагын асуудлыг тодруулахад хэрэглэгдэнэ'
+        : intent === 'contract'
+          ? 'гэрээний үүрэг, төлбөр, хугацаа хэтрэлт, хохирол болон шаардлага гаргах үндэслэлийг тодруулахад хэрэглэгдэнэ'
+          : intent === 'crime'
+            ? 'гомдол гаргах, нотлох баримт бүрдүүлэх, хариуцлагын шинжийг шалгуулахад хэрэглэгдэнэ'
+            : 'таны нөхцөлд ямар эрх, үүрэг, шаардлага үүсэхийг тодруулахад хэрэглэгдэнэ';
+  return `${ref.citation} нь ${label} тухай заалт бөгөөд ${application}.`;
+}
+
+function buildQaLawExplanationText(
+  query: string,
+  intent: QueryIntent,
+  chunks: ChromaQueryResult[],
+  allowedArticles: string[] = [],
+): string {
+  const refs = collectQaReferences(query, chunks).slice(0, 3);
+  const sentences: string[] = [buildQaLawExplanationIntro(intent, query)];
+  for (const ref of refs) {
+    sentences.push(buildReferenceExplanationSentence(ref, intent));
+  }
+
+  if (refs.length === 0 && allowedArticles.length > 0) {
+    sentences.push(
+      `${allowedArticles.slice(0, 3).join(', ')} дугаар зүйлүүдийг хэрэглэхдээ зөвхөн дугаар харах бус, тухайн заалт таны бодит нөхцөлд ямар үүрэг, шаардлага, хугацаа үүсгэж байгааг шалгах хэрэгтэй.`,
+    );
+  }
+
+  for (const addition of intentLawExplanationAdditions(intent, query)) {
+    if (countSentences(sentences.join(' ')) >= 5) {
+      break;
+    }
+    sentences.push(addition);
+  }
+
+  while (countSentences(sentences.join(' ')) < 5) {
+    sentences.push(
+      'Хэрэв эх сурвалжид яг тохирох тусгай нөхцөл дутуу байвал буруу зүйл, заалт зохиохын оронд баримтаа бүрдүүлж, эрх бүхий байгууллагаас бичгээр тодруулга авах нь илүү найдвартай.',
+    );
+  }
+
+  return sentences.join(' ');
+}
+
+function ensureLawExplanationText(
+  existing: string,
+  query: string,
+  intent: QueryIntent,
+  chunks: ChromaQueryResult[],
+  allowedArticles: string[] = [],
+): string {
+  if (
+    existing.trim() &&
+    countSentences(existing) >= 5 &&
+    !isDryLawExplanation(existing) &&
+    !hasOcrOrInternalLeakage(existing)
+  ) {
+    return existing.trim();
+  }
+
+  return buildQaLawExplanationText(query, intent, chunks, allowedArticles);
+}
+
+function ensureRiskText(existing: string, intent: QueryIntent, query: string): string {
+  const cleaned = stripMarkdownForCounting(existing);
+  const base = cleaned.length > 0 ? cleaned : buildQaRiskGuidance(intent, query);
+  if (countSentences(base) >= 2) {
+    return base;
+  }
+
+  const addition =
+    intent === 'labor'
+      ? 'Халагдсан тушаал, гардуулсан огноо, ажил олгогчийн үндэслэл тодорхойгүй байвал гомдол гаргах хугацаа болон нотолгооны асуудал хүндрэх эрсдэлтэй.'
+      : intent === 'traffic'
+        ? 'Ослын газрын зураг, цагдаагийн бүртгэл, даатгалын мэдэгдэл дутуу бол хохирол нөхөн төлүүлэх ажиллагаа удаашрах эсвэл татгалзагдах эрсдэлтэй.'
+        : intent === 'contract'
+          ? 'Гэрээ, төлбөрийн тооцоо, бичгээр өгсөн шаардлага дутуу бол нэхэмжлэлийн дүн болон үндэслэл маргаантай болж, хэрэг удаашрах эрсдэлтэй.'
+          : 'Баримт дутуу, хугацаа алдсан, шаардлага тодорхой бус байвал эрхээ хамгаалах ажиллагаа удаашрах эсвэл хэсэгчлэн хэрэгсэхгүй болох эрсдэлтэй.';
+  return `${base.replace(/[.!?。！？]*$/u, '.')} ${addition}`;
+}
+
+function buildStructuredQaContractAnswer(params: {
+  query: string;
+  intent: QueryIntent;
+  chunks: ChromaQueryResult[];
+  allowedArticles?: string[];
+  baseAnswer?: string;
+}): string {
+  const { query, intent, chunks, allowedArticles = [], baseAnswer = '' } = params;
+  const sections = extractQaAnswerSections(baseAnswer);
+  const advice = ensureAdviceText(sections.advice, intent, query);
+  const actions = ensureMinimumActionSteps(sections.actions, intent, query);
+  const lawExplanation = ensureLawExplanationText(
+    sections.lawExplanation,
+    query,
+    intent,
+    chunks,
+    allowedArticles,
+  );
+  const risks = ensureRiskText(sections.risks, intent, query);
+  const tips = ensureMinimumPracticalTips(sections.practicalTips, intent, query);
+
+  return [
+    '**Зөвлөгөө**',
+    advice,
+    '',
+    '**Яг одоо хийх алхам**',
+    ...actions.map((step, idx) => `${idx + 1}. ${step}`),
+    '',
+    '**Хуулийн тайлбар**',
+    lawExplanation,
+    '',
+    '**Анхаарах эрсдэл**',
+    risks,
+    '',
+    '**Практик зөвлөгөө**',
+    ...tips.map((tip) => `- ${tip}`),
+  ].join('\n');
+}
+
+function ensureQaGenerationResultContract(
+  result: GenerationResult,
+  intent: QueryIntent,
+  query: string,
+  chunks: ChromaQueryResult[] = [],
+  allowedArticles: string[] = [],
+): GenerationResult {
+  if (result.mode === 'no-info' || result.answer.trim() === NO_INFO_RESPONSE) {
+    return result;
+  }
+
+  return {
+    ...result,
+    answer: appendLegalInformationDisclaimer(
+      buildStructuredQaContractAnswer({
+        query,
+        intent,
+        chunks,
+        allowedArticles,
+        baseAnswer: result.answer,
+      }),
+      'qa',
+    ),
+  };
+}
+
+function appendLegalInformationDisclaimer(answer: string, mode: QueryMode): string {
+  const trimmed = answer.trim();
+  if (!trimmed || trimmed === NO_INFO_RESPONSE || mode !== 'qa') {
+    return answer;
+  }
+
+  if (trimmed.includes(LEGAL_INFORMATION_DISCLAIMER)) {
+    return trimmed;
+  }
+
+  return `${trimmed}\n\n${LEGAL_INFORMATION_DISCLAIMER}`;
+}
+
+/**
+ * Detects raw OCR-style law dumps ("Хууль: NAME Зүйл: NUM ...") and internal
+ * pipeline jargon that must never reach the user. Centralised so we can run it
+ * both before swapping to the structured fallback and during post-processing.
+ */
+function hasOcrOrInternalLeakage(answer: string): boolean {
+  if (!answer) {
+    return false;
+  }
+
+  const internalJargon =
+    /(LLM\s+үйлчилгээ|Доорх\s+контекст|Контекстэд\s+(?:давтагдсан|баталгаатайгаар)|retrieval|source\s+score|chunk\s+score|системийн\s+дотоод|Эх\s+сурвалж\s*\d+\s*\])/iu;
+  if (internalJargon.test(answer)) {
+    return true;
+  }
+
+  // "Хууль: <text> Зүйл: <num>" preprocessor prefix copied verbatim from chunks.
+  if (/Хууль\s*[:：]\s*[^.\n]{3,200}?\s+Зүйл\s*[:：]/iu.test(answer)) {
+    return true;
+  }
+
+  // "Зүйл: 1661 МӨНГӨ УГААХ" style dumps where the article header includes the
+  // raw all-caps title from the source.
+  if (/Зүйл\s*[:：]\s*\d+(?:\.\d+)?\s+[А-ЯӨҮЁ]{4,}/u.test(answer)) {
+    return true;
+  }
+
+  // All-caps law title immediately followed by ":" or "—" and "Хууль"/"Зүйл"
+  // (LLM literally pasting the [Эх сурвалж N] header line back to the user).
+  if (
+    /[А-ЯӨҮЁ]{4,}(?:[А-ЯӨҮЁ\s,/()"'«».-]{2,160}[А-ЯӨҮЁ]{2,})?\s*[:：—]\s*(?:Хууль|Зүйл)\s*[:：]/iu.test(
+      answer,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 type QaReference = {
-  summary: string;
+  /** Compact citation chip in markdown form, e.g. [ХТ-ийн §128](url) */
   citation: string;
+  /** Short human label (1 sentence, <= 120 chars) explaining what the article covers */
+  shortLabel: string;
+  /** Full verbose summary kept for scenario fallbacks that still need raw excerpts */
+  summary: string;
 };
 
 function ensureLegalLinksInAnswer(
@@ -574,7 +1532,11 @@ function ensureLegalLinksInAnswer(
   chunks: ChromaQueryResult[],
 ): string {
   const trimmed = answer.trim();
-  if (!trimmed || trimmed === NO_INFO_RESPONSE || /legalinfo\.mn\/mn\/detail\?lawId=/i.test(trimmed)) {
+  if (
+    !trimmed ||
+    trimmed === NO_INFO_RESPONSE ||
+    /legalinfo\.mn\/mn\/detail\?lawId=/i.test(trimmed)
+  ) {
     return answer;
   }
 
@@ -595,17 +1557,15 @@ function ensureLegalLinksInAnswer(
   ].join('\n');
 }
 
-function cleanupAnswerStructure(answer: string): string {
-  const lines = answer.split(/\r?\n/);
+export function cleanupAnswerStructure(answer: string): string {
+  const ocrStripped = stripOcrLeakage(answer);
+  const lines = ocrStripped.split(/\r?\n/);
   const cleaned: string[] = [];
-  const orphanSectionLabels =
-    /^(?:Зөвлөгөө|Яг одоо хийх алхам|Хуулийн үндэслэл|Хуулийн тайлбар|Анхаарах эрсдэл|Практик зөвлөгөө)$/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const current = lines[i]?.trim() ?? '';
-    const next = lines[i + 1]?.trim() ?? '';
 
-    if (/^\d+$/.test(current) && orphanSectionLabels.test(next.replace(/\*\*/g, ''))) {
+    if (/^\d+$/.test(current)) {
       continue;
     }
 
@@ -617,6 +1577,35 @@ function cleanupAnswerStructure(answer: string): string {
       continue;
     }
 
+    const normalizedCurrent = current
+      .replace(/^\d+\.\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const isDuplicateMeaningfulLine =
+      normalizedCurrent.length >= 32 &&
+      cleaned.some(
+        (line) =>
+          line
+            .trim()
+            .replace(/^\d+\.\s*/, '')
+            .replace(/\s+/g, ' ')
+            .toLowerCase() === normalizedCurrent,
+      );
+
+    if (isDuplicateMeaningfulLine) {
+      continue;
+    }
+
+    if (
+      /^(?:Контекстэд давтагдсан|Контекстэд баталгаатайгаар|Контекст сул үед|retrieval|source score|LLM\s+үйлчилгээ|Доорх\s+контекст|\[Эх\s+сурвалж\s*\d+)/i.test(
+        current,
+      ) ||
+      /Контекстэд баталгаатайгаар/i.test(current)
+    ) {
+      continue;
+    }
+
     cleaned.push(lines[i] ?? '');
   }
 
@@ -624,6 +1613,119 @@ function cleanupAnswerStructure(answer: string): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/**
+ * Removes OCR/preprocessor leakage that the LLM sometimes copies verbatim from
+ * the retrieved chunks. Operates line-by-line so we strip individual offending
+ * lines without breaking the surrounding markdown structure.
+ *
+ * Patterns removed:
+ *   - "Хууль: <NAME> Зүйл: <num>" preprocessor headers
+ *   - "Зүйл: 1661 МӨНГӨ УГААХ" raw all-caps article headers
+ *   - "LLM үйлчилгээ түр боломжгүй..." / "Доорх контекстээс олдсон..." pipeline jargon
+ *   - "[Эх сурвалж N] ..." retrieval debug headers
+ *
+ * Embedded inside a longer line (e.g. inline reference list) the OCR fragment
+ * is replaced with a soft separator so the surrounding sentence stays
+ * grammatical.
+ */
+export function stripOcrLeakage(answer: string): string {
+  if (!answer) {
+    return answer;
+  }
+
+  const lineFilters: RegExp[] = [
+    /^\s*LLM\s+үйлчилгээ.*$/iu,
+    /^\s*Доорх\s+контекст[^\n]*$/iu,
+    /^\s*\[Эх\s+сурвалж\s*\d+\]?[^\n]*$/iu,
+    /^\s*Хууль\s*[:：]\s*[А-ЯӨҮЁ][^\n]{0,200}\s+Зүйл\s*[:：][^\n]*$/iu,
+  ];
+
+  const inlineReplacements: Array<{ pattern: RegExp; replacement: string }> = [
+    // "Хууль: NAME Зүйл: NUM TITLE-IN-CAPS" embedded inline
+    {
+      pattern:
+        /Хууль\s*[:：]\s*[^\n.,;]{3,200}?\s+Зүйл\s*[:：]\s*\d+(?:\.\d+)?(?:\s+[А-ЯӨҮЁ][А-ЯӨҮЁ\s,/()"'«».-]{2,160})?/giu,
+      replacement: '',
+    },
+    // "Зүйл: 1661 МӨНГӨ УГААХ" inline (when not the start of a structured ref line)
+    {
+      pattern: /Зүйл\s*[:：]\s*\d+(?:\.\d+)?\s+[А-ЯӨҮЁ]{4,}[А-ЯӨҮЁ\s,/()"'«».-]{0,160}/giu,
+      replacement: '',
+    },
+    // "LLM үйлчилгээ түр боломжгүй..." / "Доорх контекстээс" inline
+    {
+      pattern: /(LLM\s+үйлчилгээ[^.\n]*\.|Доорх\s+контекст[^.\n]*\.)/giu,
+      replacement: '',
+    },
+  ];
+
+  const linesIn = answer.split(/\r?\n/);
+  const linesOut: string[] = [];
+
+  for (const original of linesIn) {
+    if (lineFilters.some((rx) => rx.test(original))) {
+      continue;
+    }
+
+    let next = original;
+    for (const { pattern, replacement } of inlineReplacements) {
+      next = next.replace(pattern, replacement);
+    }
+
+    next = next.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1');
+
+    if (next.trim() === '' && original.trim() !== '') {
+      // The whole line was OCR leakage; drop it instead of leaving a blank.
+      continue;
+    }
+
+    linesOut.push(next);
+  }
+
+  return linesOut
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Cleans the raw chunk body before it is injected into the LLM prompt. The
+ * preprocessor that produced the embeddings prepended each chunk with
+ * "Хууль: <NAME> Зүйл: <num> <ARTICLE TITLE IN CAPS>" plus various structural
+ * artefacts. The LLM occasionally copies that verbatim into the answer, so we
+ * strip it here at the prompt boundary.
+ *
+ * The header line ([Эх сурвалж N] ...) is built separately by
+ * buildContextBlock from clean metadata.
+ */
+export function cleanChunkDocumentForPrompt(text: string): string {
+  if (!text) {
+    return '';
+  }
+
+  let body = text.replace(/\r/g, '').trim();
+
+  // Drop the leading "Хууль: <name> Зүйл: <num> <CAPS TITLE>" preprocessor prefix.
+  body = body.replace(
+    /^Хууль\s*[:：]\s*[^\n]{3,300}?\s+Зүйл\s*[:：]\s*\d+(?:\.\d+)?(?:\s+[А-ЯӨҮЁ][А-ЯӨҮЁ\s,/()"'«».-]{2,200})?\s*/iu,
+    '',
+  );
+
+  // Inline duplicates if the OCR header repeats further down the chunk body.
+  body = body.replace(
+    /Хууль\s*[:：]\s*[^\n.,;]{3,200}?\s+Зүйл\s*[:：]\s*\d+(?:\.\d+)?(?:\s+[А-ЯӨҮЁ][А-ЯӨҮЁ\s,/()"'«».-]{2,200})?/giu,
+    '',
+  );
+
+  // Collapse runs of whitespace introduced by the strip.
+  body = body
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return body;
 }
 
 function buildQaOpeningAdvice(intent: QueryIntent, query: string): string {
@@ -708,59 +1810,15 @@ function buildDetailedQaFallbackFromContext(
   intent: QueryIntent,
   allowedArticles: string[],
 ): { answer: string; confidence: number } {
-  const refs = collectQaReferences(query, chunks).slice(0, 4);
-  const evidenceLines =
-    refs.length > 0
-      ? refs.map((ref, idx) => `${idx + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
-      : '- Контекстэд хамаарах лавлах эх сурвалж хангалтгүй байна.';
-
-  const steps = buildQaActionSteps(intent, query).slice(0, 4);
-  const risks = buildQaRiskGuidance(intent, query);
-  const tips = buildQaPracticalTips(intent, query).slice(0, 4);
-  const articleLine =
-    allowedArticles.length > 0
-      ? `Контекстэд давтагдсан зүйл, заалт: ${allowedArticles.map((a) => `${a} дугаар зүйл`).join(', ')}.`
-      : 'Контекстэд баталгаажсан зүйл, заалтын хүрээнд маргааны үндэслэлээ тодорхойлох нь зүйтэй.';
-
-  const standardizedAnswer = [
-    '**Зөвлөгөө**',
-    buildQaOpeningAdvice(intent, query),
-    '',
-    '**Яг одоо хийх алхам**',
-    ...steps.map((step, idx) => `${idx + 1}. ${step}`),
-    '',
-    '**Хуулийн тайлбар**',
-    buildQaLawExplanationIntro(intent, query),
-    '',
-    evidenceLines,
-    '',
-    '**Анхаарах эрсдэл**',
-    risks,
-    '',
-    '**Практик зөвлөгөө**',
-    ...tips.map((tip) => `- ${tip}`),
-  ].join('\n');
-
-  return { answer: standardizedAnswer, confidence: 0.68 };
-
-  const answer = [
-    'Асуулттай холбоотой зохицуулалтыг доорх байдлаар дэлгэрэнгүй нэгтгэв.',
-    '',
-    '1. Холбогдох хуулийн үндэслэл',
-    evidenceLines,
-    '',
-    '2. Эрхээ хэрэгжүүлэх дараалал',
-    ...steps.map((step, idx) => `${idx + 1}. ${step}`),
-    '',
-    '3. Анхаарах нөхцөл ба үр дагавар',
-    risks,
-    articleLine,
-    '',
-    '**Практик зөвлөгөө**',
-    ...tips.map((tip) => `- ${tip}`),
-  ].join('\n');
-
-  return { answer, confidence: 0.68 };
+  return {
+    answer: buildStructuredQaContractAnswer({
+      query,
+      intent,
+      chunks,
+      allowedArticles,
+    }),
+    confidence: 0.68,
+  };
 }
 
 function buildTrafficIncidentFallback(
@@ -772,7 +1830,7 @@ function buildTrafficIncidentFallback(
     .slice(0, 3);
   const lawLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Замын хөдөлгөөний аюулгүй байдлын тухай хууль болон Замын хөдөлгөөний дүрмийн жолоочийн үүргийн зохицуулалт — осол гарсан үед хүний аюулгүй байдлыг хангах, ослын газрыг хамгаалах, цагдаад мэдэгдэх, баримт бүрдүүлэх суурь үүргийг тодорхойлдог.',
           '2. Зөрчлийн тухай хуулийн замын хөдөлгөөний зөрчилтэй холбоотой зохицуулалт — хүн гэмтээгүй, хохирлын шинжтэй осол бол зөрчлийн журмаар шалгагдах боломжтой.',
@@ -813,7 +1871,7 @@ function buildTrafficInsuranceClaimFallback(
   const refs = collectQaReferences(query, chunks).slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : '1. Даатгалын гэрээ, нөхөн төлбөрөөс татгалзсан үндэслэл, хохирол нотлох баримтаа бичгээр шалгуулах шаардлагатай.';
 
   const answer = [
@@ -860,7 +1918,7 @@ function buildBankLoanOverdueFallback(
     .slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Иргэний хууль §451-452 орчим — банк, зээлийн үйл ажиллагаа эрхлэх эрх бүхий этгээдээс зээл олгох гэрээ болон зээлийн хүүгийн үндсэн зохицуулалт.',
           '2. Иргэний хууль §222, §232 орчим — үүрэг хугацаандаа биелүүлээгүй, анз/алданги тохирсон эсэхээс шалтгаалах иргэний эрх зүйн хариуцлагын суурь.',
@@ -904,11 +1962,13 @@ function buildBankLoanOverdueFallback(
 
 function buildCyberFraudFallback(query: string, chunks: ChromaQueryResult[]): GenerationResult {
   const refs = collectQaReferences(query, chunks)
-    .filter((ref) => /зали|луйвар|нотлох|цагдаа|хохирогч|харилцаа холбоо|эрүүгийн/i.test(ref.summary))
+    .filter((ref) =>
+      /зали|луйвар|нотлох|цагдаа|хохирогч|харилцаа холбоо|эрүүгийн/i.test(ref.summary),
+    )
     .slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Эрүүгийн хууль дахь залилах гэмт хэргийн зохицуулалт нь бусдыг хууран мэхэлж мөнгө, эд хөрөнгө шилжүүлэн авсан нөхцөлд шалгагдах үндсэн суурь болно.',
           '2. Эрүүгийн хэрэг хянан шийдвэрлэх ажиллагаанд чат, шилжүүлгийн баримт, дансны мэдээлэл, дуудлага, линк, төхөөрөмжийн мэдээлэл зэрэг нь нотлох баримтын ач холбогдолтой.',
@@ -953,11 +2013,13 @@ function buildCyberFraudFallback(query: string, chunks: ChromaQueryResult[]): Ge
 
 function buildPhoneTheftFallback(query: string, chunks: ChromaQueryResult[]): GenerationResult {
   const refs = collectQaReferences(query, chunks)
-    .filter((ref) => /хулгай|цагдаа|эрэн|сурвалж|нотлох|харилцаа холбоо|imei|хохирогч|эрүүгийн/i.test(ref.summary))
+    .filter((ref) =>
+      /хулгай|цагдаа|эрэн|сурвалж|нотлох|харилцаа холбоо|imei|хохирогч|эрүүгийн/i.test(ref.summary),
+    )
     .slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Гар утсыг нууцаар авсан, буцааж өгөхгүй завшсан, эсвэл худалдан борлуулсан байж болзошгүй бол хулгайлах болон эд хөрөнгөтэй холбоотой гэмт хэргийн шинжээр шалгуулна.',
           '2. Цагдаад гомдол гаргахдаа IMEI, серийн дугаар, худалдан авалтын баримт, дугаар, төхөөрөмжийн сүүлийн байршил, Find My/Find My Device-ийн мэдээлэл, камер болон гэрчийн мэдээллээ хавсаргана.',
@@ -1004,7 +2066,7 @@ function buildPublicNoiseFallback(chunks: ChromaQueryResult[]): GenerationResult
   const refs = collectQaReferences('амгалан тайван байдал дуу чимээ', chunks).slice(0, 3);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : '1. Орон сууцны орчинд бусдын амгалан тайван байдлыг алдагдуулсан дуу чимээний асуудлыг ихэвчлэн зөрчлийн болон цагдаагийн байгууллагын гомдол, дуудлагын журмаар шалгуулна.';
 
   const answer = [
@@ -1047,18 +2109,20 @@ function buildLaborDocumentChecklistFallback(): GenerationResult {
     'Ажлаас үндэслэлгүй халсан эсэхийг маргахдаа хамгийн түрүүнд ажлаас халсан шийдвэр, хөдөлмөрийн гэрээ, цалин болон ажилласан хугацааг нотлох баримтаа бүрдүүлнэ.',
     '',
     '**Яг одоо бүрдүүлэх баримт**',
-    '1. Ажлаас халсан тушаал, мэдэгдэл, ажил олгогчийн өгсөн тайлбар авсан эсэх.',
-    '2. Хөдөлмөрийн гэрээ, ажлын байрны тодорхойлолт, дотоод журам, нэмэлт гэрээ.',
-    '3. Цалингийн баримт, нийгмийн даатгалын шимтгэлийн лавлагаа, цагийн бүртгэл.',
-    '4. Халагдсан шалтгаантай холбоотой имэйл, чат, сануулах хуудас, сахилгын материал, гэрчийн мэдээлэл.',
+    '- Ажлаас халсан тушаал, мэдэгдэл, ажил олгогчоос тайлбар авсан эсэх (албан бичгээр).',
+    '- Хөдөлмөрийн гэрээ, ажлын байрны тодорхойлолт, дотоод журам, нэмэлт гэрээнүүд.',
+    '- Цалингийн баримт, цалингийн хуудас, нийгмийн даатгалын шимтгэлийн лавлагаа, цагийн бүртгэл, цалин шилжсэн банкны хуулга.',
+    '- Сахилгын шийтгэлийн материал, сануулах хуудас, шалгах ажиллагааны тэмдэглэл (хэрэв бий бол).',
+    '- Халагдсан шалтгаантай холбоотой имэйл, чат, мессеж, гэрчийн мэдээлэл.',
+    '- Хувийн ажилгүй байсан хугацааны нотолгоо: ажил эрж тэмцсэн зар, эрүүл мэндийн магадлагаа.',
     '',
     '**Анхаарах зүйл**',
-    'Ажил олгогч халсан үндэслэлээ хуульд нийцүүлж, бичгээр баримтжуулсан байх ёстой. Тушаал, мэдэгдэл, тайлбар дутуу бол маргаанд таны талд ашиглагдах боломжтой.',
+    'Ажил олгогч халсан үндэслэлээ хуульд нийцүүлж, бичгээр баримтжуулсан байх ёстой. Тушаал, мэдэгдэл, тайлбар дутуу бол маргаанд таны талд ашиглагдах боломжтой. Хөдөлмөрийн маргаанд гомдол, нэхэмжлэл гаргах хугацааг үлдсэн өдрөөр нь шалгаарай.',
     '',
     '**Практик зөвлөгөө**',
     '- Баримтуудаа огнооны дарааллаар ангилж нэг хавтаст хий.',
     '- Ажил олгогчоос тушаал, тооцооны хуудас, нийгмийн даатгалын бичилтээ бичгээр шаардаж ав.',
-    '- Хөдөлмөрийн маргааны хугацаа алдах эрсдэлтэй тул гомдол, нэхэмжлэл гаргах хугацаагаа яаралтай шалга.',
+    '- Хариу өгөхгүй бол шаардсан огноог тэмдэглэж, дараа маргаанд нотолгоо болгон ашигла.',
   ].join('\n');
 
   return {
@@ -1075,6 +2139,230 @@ function buildLaborDocumentChecklistFallback(): GenerationResult {
   };
 }
 
+function buildContractDocumentChecklistFallback(): GenerationResult {
+  const answer = [
+    'Гэрээний маргаан, өр төлбөр, нөхөн төлбөрийн асуудалд таны шаардлагыг нотлох гэрээ, тооцоо, төлбөрийн баримт, харилцсан мэдэгдэл нь үндсэн нотолгоо болно.',
+    '',
+    '**Яг одоо бүрдүүлэх баримт**',
+    '- Үндсэн гэрээ, нэмэлт гэрээ, эргэн төлөлтийн хуваарь, хавсралт бүхий хуудас.',
+    '- Төлбөр, шилжүүлгийн баримт, банкны хуулга, төлсөн огноо, дүн, гүйлгээний тайлбар.',
+    '- Нөгөө талд өгсөн бичгийн шаардлага, мэдэгдэл, имэйл, чат, ажил гүйцэтгэсэн акт.',
+    '- Гэрээ зөрчигдсөн нөхцөлийг нотлох баримт: гүйцэтгэл хоцорсон цаг хугацаа, чанарын акт, гуравдагч талын тайлан, гэрчийн мэдээлэл.',
+    '- Хохирлын тооцоо: алдагдсан орлого, нэмж зарцуулсан зардал, гуравдагч талд төлсөн торгууль.',
+    '- Барьцаа, баталгаа, даатгалын гэрээ (хэрэв байгаа бол).',
+    '',
+    '**Анхаарах зүйл**',
+    'Гэрээний өргөдөл, мэдэгдлээ зөвхөн амаар биш заавал бичгээр хүргүүлж, хүлээн авсныг батлуулах нь чухал. Хугацаа хэтрүүлсэн анз, алданги, хүү тооцох нөхцлийг гэрээний заалттай нь шалгасны дараа шаардлагаа бичгээр гарга.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Гэрээний хувь хүн бүрд нэг хувь хадгалуулсан байх ёстой; алга бол нөгөө талаас хуулбар шаардаж ав.',
+    '- Хохирлын тооцоог үндсэн өр, хүү, нэмэгдсэн хүү, шүүхийн зардал гэж тус тусад нь задлан гарга.',
+    '- Дамжуулсан мэдэгдлийг и-мэйл, мессеж, бичгээр зэрэг 2 сувгаар явуулж нотолгоо хадгал.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: 0.72,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: 'context',
+    suggestedQuestions: [
+      'Гэрээний заалт зөрчигдсөнийг ямар баримтаар хамгийн сайн нотлох вэ?',
+      'Шүүхэд хандахаас өмнө бичгийн шаардлагын загвар бичиж өгөх үү?',
+      'Гэрээний хүү, алданги хууль ёсны эсэхийг яаж шалгах вэ?',
+    ],
+  };
+}
+
+function buildTrafficDocumentChecklistFallback(): GenerationResult {
+  const answer = [
+    'Зам тээврийн ослын маргаан болон даатгалын нөхөн төлбөрийн асуудалд цагдаагийн тэмдэглэл, ослын схем, баримт, гэрчийн мэдээлэл нь шийдвэрлэх нотолгоо болно.',
+    '',
+    '**Яг одоо бүрдүүлэх баримт**',
+    '- Цагдаагийн ослын бүртгэл, ослын схем, талбайн үзлэгийн акт, эрх бүхий хүний шийдвэр.',
+    '- Тээврийн хэрэгслийн гэмтлийн зураг, видео, дэшкам бичлэг (4 талаас, бүх хорсон цэг тус бүрд).',
+    '- Жолоочийн үнэмлэх, тээврийн хэрэгслийн гэрчилгээ, даатгалын полис, нөгөө талын ижил мэдээлэл.',
+    '- Хохирлын үнэлгээ: засварын газрын акт, бэлэн эд анги, ажилчны хөдөлмөрийн зардал, зөөвөрлөлтийн төлбөр.',
+    '- Хүн гэмтсэн бол эмнэлгийн магадлагаа, оношилгоо, эмчилгээний баримт, ажилгүй байсан хугацааны тайлан.',
+    '- Гэрчийн нэр, утас, тайлбар, ослын газрын ойролцоох камер бичлэгийг авах хүсэлт.',
+    '',
+    '**Анхаарах зүйл**',
+    'Даатгалын компанид мэдэгдэх хугацаа гэрээнд тусгайлан заасан байдаг (ихэвчлэн 24-72 цаг). Хугацаа хоцорвол нөхөн төлбөрөөс татгалзах үндэслэл болж болзошгүй. Хүн гэмтсэн, согтуугаар жолоодсон, ослын газраас явсан тохиолдолд зөвхөн даатгал биш зөрчил/эрүүгийн хариуцлага үүснэ.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Ослын газрыг хөдөлгөхөөс өмнө 4 талаас зураг ав, ойр орчны камер, гэрчийг тэр дор нь бүртгэ.',
+    '- Даатгалд мэдэгдсэн огноо, харилцагчийн нэр, лавлагааны дугаарыг бичгээр баримтжуул.',
+    '- Засварыг эхлүүлэхээс өмнө даатгалын үнэлгээ хийлгэх, акт гаргуулах.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: 0.72,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: 'context',
+    suggestedQuestions: [
+      'Даатгалын компанид мэдэгдэх албан бичгийн загвар бичиж өгөх үү?',
+      'Камер байхгүй бол ослыг ямар баримтаар нотлох вэ?',
+      'Хохирлын үнэлгээг нэмж шалгуулах боломжтой юу?',
+    ],
+  };
+}
+
+function buildCrimeDocumentChecklistFallback(): GenerationResult {
+  const answer = [
+    'Эрүүгийн шинжтэй асуудалд (залилан, хулгай, цахим луйвар, эд хөрөнгөтэй холбоотой) цагдаад өгөх гомдолд та өөрөө нотлох баримтаа бүрэн бэлдэх хэрэгтэй.',
+    '',
+    '**Яг одоо бүрдүүлэх баримт**',
+    '- Хохирлын тодорхой тооцоо: алдсан мөнгөн дүн, эд хөрөнгө, дансны хуулга, шилжүүлгийн баримт.',
+    '- Сэжигтэн этгээдтэй харилцсан чат, мессеж, дуудлагын түүх, зар, профайл, линкийг устгахгүй screenshot хэлбэрээр.',
+    '- IMEI, серийн дугаар, худалдан авалтын баримт, хайрцаг (гар утас, цахим төхөөрөмжийн хувьд).',
+    '- Гэрчийн нэр, утас, тайлбар; ослын/үйлдлийн газрын камерын бичлэгийн хүсэлт.',
+    '- Банкны харилцагчийн алба, оператор, үйлчилгээ үзүүлэгчид өгсөн бичгийн мэдэгдэл, хариу.',
+    '- Хохирогчийн мэдүүлгийн төсөл (хэн, хэзээ, хаана, юу болсон, хэн оролцсон).',
+    '',
+    '**Анхаарах зүйл**',
+    'Цаг хугацаа маш чухал: гүйлгээ дамжих, чат устгагдах, камерын бичлэг 24-72 цагт устах эрсдэлтэй. Цагдаад мэдэгдсэн огноо, хүлээж авсан албан тушаалтны нэр, бүртгэлийн дугаарыг заавал бичгээр ав.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Гомдлын өргөдөлдөө хохирлын дүн, үйлдэл, нотолгоог нэг бүрчлэн бич.',
+    '- Цахим баримтыг screenshot + PDF давхар хадгалж, файлын огноо цагийг хадгал.',
+    '- "Мөнгөө буцааж авах" гэх дахин шилжүүлгийн саналд татгалз; шинэ хохирол үүсгэх эрсдэлтэй.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: 0.72,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: 'context',
+    suggestedQuestions: [
+      'Цагдаад өгөх гомдлын өргөдлийн загвар бичиж өгөх үү?',
+      'Цахим баримтыг хуулийн өмнө хүчинтэй хэлбэрээр яаж хадгалах вэ?',
+      'Хохирол нөхөн төлүүлэх иргэний нэхэмжлэлийг хэзээ нэмж гаргах вэ?',
+    ],
+  };
+}
+
+function buildFamilyDocumentChecklistFallback(): GenerationResult {
+  const answer = [
+    'Гэр бүлийн маргаан, хүүхдийн тэтгэлэг, асрамж, гэр бүл цуцлуулах асуудлуудад гэр бүлийн харилцааны болон орлого-эд хөрөнгийн баримт нь нотолгооны үндэс болно.',
+    '',
+    '**Яг одоо бүрдүүлэх баримт**',
+    '- Гэр бүлийн гэрчилгээ, төрсний гэрчилгээ, хүүхдийн төрсний бүртгэл.',
+    '- Орлогын баримт: цалин, татварын тооцоо, нийгмийн даатгалын лавлагаа, хувиараа ажилладаг бол санхүүгийн тайлан.',
+    '- Хүүхэдтэй холбоотой зардлын баримт: цэцэрлэг, сургуулийн төлбөр, эмчилгээ, хоол хүнс, хувцас.',
+    '- Орон сууцны нөхцлийн нотолгоо: гэрчилгээ, гэрээ, оршин суух хаягийн лавлагаа, тэжээгчийн харилцаа.',
+    '- Гэр бүлийн харилцааны баримт: чат, имэйл, гэрчийн тайлбар, тогтоосон тохиролцоо.',
+    '- Эрүүл мэндийн магадлагаа, хүчирхийллийн нотолгоо (хэрэв тэр асуудал орсон бол).',
+    '',
+    '**Анхаарах зүйл**',
+    'Хүүхдийн эрх ашгийг хамгаалах нь шүүхийн анхаардаг гол зүйл. Хүүхдийн оршин суух газар, сурч хүмүүжих орчин, эцэг эх тус бүртэй харилцах байдлыг нотлох баримт нь шийдвэрт шууд нөлөөлнө.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Эвлэрлийн оролдлогыг бичгээр буюу гэр бүлийн зөвлөгөө өгөх албанд бүртгүүлж нотолгоо үлдээ.',
+    '- Тэтгэлгийн тооцоог сарын дундаж зардлаар хүүхэд тус бүрд нь задлан гарга.',
+    '- Орлогын мэдээллийг сүүлийн 6-12 сараар тооцож, банкны хуулга хавсарга.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: 0.72,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: 'context',
+    suggestedQuestions: [
+      'Тэтгэлгийн дүнг яаж тооцох вэ?',
+      'Хүүхдийн асрамжид шүүх ямар баримт онцолж үздэг вэ?',
+      'Гэр бүл цуцлуулах өргөдөл хаашаа гаргах вэ?',
+    ],
+  };
+}
+
+function buildGenericDocumentChecklistFallback(): GenerationResult {
+  const answer = [
+    'Хууль зүйн маргаанд таны шаардлага, эрхийг нотлох баримтыг урьдчилан цэгцлэх нь шийдвэрлэх эхний алхам юм.',
+    '',
+    '**Яг одоо бүрдүүлэх баримт**',
+    '- Холбогдох гэрээ, тушаал, акт, бичиг баримт (анхны хувь эсвэл албан бичгээр баталгаажсан хуулбар).',
+    '- Мөнгөн төлбөрийн баримт: банкны хуулга, кассын баримт, шилжүүлгийн тайлан, нэхэмжлэх.',
+    '- Нөгөө талтай харилцсан мэдэгдэл: имэйл, мессеж, чат, бичгийн өргөдөл болон хариу.',
+    '- Гэрчийн нэр, утас, тайлбар; орчны камерын бичлэгийн хүсэлт.',
+    '- Хохирлын тооцоо: бодит зардал, олох ёстой байсан орлого, төлсөн торгууль.',
+    '- Хууль ёсны төлөөлөл хийх итгэмжлэл, өөрийн иргэний үнэмлэхний хуулбар.',
+    '',
+    '**Анхаарах зүйл**',
+    'Аман тохиролцоо нь нотлоход хүндрэлтэй тул бүх шаардлага, хариуг бичгээр баримтжуулах нь чухал. Хуулийн хугацаа (гомдол, нэхэмжлэл гаргах) алдвал шаардах эрхээ алдах эрсдэлтэй.',
+    '',
+    '**Практик зөвлөгөө**',
+    '- Баримтаа огнооны дарааллаар ангилж нэг хавтаст хий.',
+    '- Шаардлагатай бол нотариатаар хуулбарыг баталгаажуулж бэлд.',
+    '- Аль эрх бүхий байгууллагад хандах эсэхээ урьдчилан тодорхойлж, тэр шатанд шаардагдах нэмэлт маягтыг олж аваарай.',
+  ].join('\n');
+
+  return {
+    answer,
+    confidence: 0.66,
+    promptTokens: 0,
+    completionTokens: 0,
+    mode: 'fallback-general',
+    suggestedQuestions: [
+      'Миний нөхцөлд хамгийн чухал нотолгоо нь юу вэ?',
+      'Аль байгууллагад хамгийн түрүүнд хандах вэ?',
+      'Хууль ёсны хугацаагаа яаж шалгах вэ?',
+    ],
+  };
+}
+
+function buildDocumentChecklistByIntent(intent: QueryIntent): GenerationResult {
+  switch (intent) {
+    case 'labor':
+      return buildLaborDocumentChecklistFallback();
+    case 'contract':
+      return buildContractDocumentChecklistFallback();
+    case 'traffic':
+      return buildTrafficDocumentChecklistFallback();
+    case 'crime':
+      return buildCrimeDocumentChecklistFallback();
+    case 'family':
+      return buildFamilyDocumentChecklistFallback();
+    default:
+      return buildGenericDocumentChecklistFallback();
+  }
+}
+
+/**
+ * Heuristic: when the user explicitly asked "ямар баримт бүрдүүлэх вэ?" the LLM
+ * is expected to produce a clear bullet-style checklist. If it returned a short
+ * generic answer with few bullets and almost no mention of "баримт/нотолгоо",
+ * we treat it as a weak response and swap in the deterministic checklist.
+ */
+function isWeakDocumentChecklistAnswer(answer: string): boolean {
+  const cleaned = answer.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return true;
+  }
+
+  const wordCount = cleaned.split(' ').length;
+  if (wordCount < 90) {
+    return true;
+  }
+
+  const bulletCount = (answer.match(/^\s*[-*]\s+/gm) ?? []).length;
+  if (bulletCount < 4) {
+    return true;
+  }
+
+  const mentionsDocuments = /баримт|нотолгоо|нотлох|тушаал|гэрээ|хуудас|акт|бичиг|тооцоо/i.test(
+    cleaned,
+  );
+  if (!mentionsDocuments) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildConsumerRefundFallback(query: string, chunks: ChromaQueryResult[]): GenerationResult {
   const refs = collectQaReferences(query, chunks)
     .filter((ref) =>
@@ -1085,7 +2373,7 @@ function buildConsumerRefundFallback(query: string, chunks: ChromaQueryResult[])
     .slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Хэрэглэгчийн эрхийг хамгаалах тухай хууль болон Иргэний хуулийн худалдах-худалдан авах гэрээний зохицуулалтаар доголдолтой бараанд засварлуулах, солих, үнийг бууруулах, буцаах, хохирол шаардах боломжийг шалгана.',
           '2. Онлайн худалдан авалтын үед захиалгын баримт, төлбөрийн баримт, хүргэлтийн мэдээлэл, дэлгүүртэй харилцсан чат, бүтээгдэхүүний зураг нь шаардлага гаргах үндсэн нотолгоо болно.',
@@ -1130,20 +2418,18 @@ function buildLaborDismissalWageFallback(
   query: string,
   chunks: ChromaQueryResult[],
 ): GenerationResult {
-  const dismissalFocus = /ажлаас|халагд|халуул|халсан|үндэслэлгүй/i.test(
-    normalizeForMatch(query),
-  );
+  const dismissalFocus = /ажлаас|халагд|халуул|халсан|үндэслэлгүй/i.test(normalizeForMatch(query));
   const refs = collectQaReferences(query, chunks)
-    .filter((ref) =>
-      /хөдөлмөр|ажлаас|халах|халагд|дуусгавар|цалин|олговор|ажил\s+олгогч|маргаан/i.test(
-        normalizeForMatch(`${ref.summary} ${ref.citation}`),
-      ) &&
-      !/ажил\s+үүрэг\s+гүйцэтгэхийг\s+түдгэлзүүлэх/i.test(normalizeForMatch(ref.summary)),
+    .filter(
+      (ref) =>
+        /хөдөлмөр|ажлаас|халах|халагд|дуусгавар|цалин|олговор|ажил\s+олгогч|маргаан/i.test(
+          normalizeForMatch(`${ref.summary} ${ref.citation}`),
+        ) && !/ажил\s+үүрэг\s+гүйцэтгэхийг\s+түдгэлзүүлэх/i.test(normalizeForMatch(ref.summary)),
     )
     .slice(0, 4);
   const referenceLines =
     refs.length > 0
-      ? refs.map((ref, index) => `${index + 1}. ${ref.summary}\n   ${ref.citation}`).join('\n\n')
+      ? formatCompactReferenceLines(refs)
       : [
           '1. Хөдөлмөрийн тухай хуульд хөдөлмөр эрхлэлтийн харилцаа дуусгавар болгох үндэслэл, ажлаас халсан шийдвэр гаргах журам, цалин хөлс, олговор, хөдөлмөрийн маргаан шийдвэрлэх журмыг шалгана.',
           '2. Цалин төлүүлэх шаардлага нь ажилласан хугацаа, цалингийн тооцоо, тушаал, гэрээ, цагийн бүртгэлээр нотлогдох ёстой.',
@@ -1230,15 +2516,77 @@ function collectQaReferences(query: string, chunks: ChromaQueryResult[]): QaRefe
 
     const abbrev = resolveQaLawAbbrev(title, lawId);
     const citation = articleNo ? `[${abbrev}-ийн §${articleNo}](${url})` : `[${title}](${url})`;
-    const excerpt = compactFallbackText(String(chunk.document ?? ''), 180);
-    const summary = articleTitle
-      ? `${title} — ${articleTitle}: ${excerpt}`
-      : `${title}: ${excerpt}`;
+    const cleanArticleTitle = cleanArticleTitleForUser(articleTitle);
+    const excerpt = cleanReferenceExcerptForUser(String(chunk.document ?? ''));
+    const sourceLabel = articleNo ? `${title} §${articleNo}` : title;
+    const summary = cleanArticleTitle
+      ? `${sourceLabel} — ${cleanArticleTitle}. ${excerpt}`
+      : `${sourceLabel}. ${excerpt}`;
+    const shortLabel = cleanArticleTitle || firstSentenceOfExcerpt(excerpt, 120);
 
-    refs.push({ summary, citation });
+    refs.push({ summary, citation, shortLabel });
   }
 
   return refs;
+}
+
+function firstSentenceOfExcerpt(text: string, maxLen: number): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return '';
+  }
+
+  const match = cleaned.match(/^[^.!?…]+[.!?…]/u);
+  const first = match ? match[0].trim() : cleaned;
+  if (first.length <= maxLen) {
+    return first;
+  }
+
+  return `${first.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+}
+
+/**
+ * Format a list of QaReference items as a compact bullet list of citation
+ * chips with an optional short label, e.g.:
+ *   - [ХТ-ийн §128](url) — Цалин хөлсний төрөл
+ * Use this instead of the legacy verbose `${idx}. ${summary}\n  ${citation}`
+ * pattern so scenario fallbacks stop dumping raw chunk excerpts into the
+ * "Хуулийн тайлбар" section.
+ */
+function formatCompactReferenceLines(refs: QaReference[]): string {
+  const lines = refs
+    .filter((ref) => ref.citation && ref.citation.length > 0)
+    .map((ref) => (ref.shortLabel ? `- ${ref.citation} — ${ref.shortLabel}` : `- ${ref.citation}`));
+  return lines.join('\n');
+}
+
+function cleanArticleTitleForUser(title: string): string {
+  const cleaned = title.replace(/\s+/g, ' ').trim();
+  if (
+    !cleaned ||
+    /^(?:хамаарахгүй|үйлчлэхгүй|нэгэн адил хамаарна|д заасан|д заасны дагуу|энэ хууль|хууль тогтоомж)$/iu.test(
+      cleaned,
+    )
+  ) {
+    return '';
+  }
+
+  return cleaned.length > 90 ? `${cleaned.slice(0, 87).trimEnd()}…` : cleaned;
+}
+
+function cleanReferenceExcerptForUser(text: string): string {
+  let cleaned = text.replace(/\s+/g, ' ').trim();
+  cleaned = cleaned
+    .replace(/^Хууль:\s*[^:]{0,220}?\s+Зүйл:\s*\d+(?:\.\d+)?\s*/iu, '')
+    .replace(/^\d+(?:\.\d+)?\s*(?:дүгээр|дугаар)\s+зүйл\.?\s*/iu, '')
+    .replace(/^[А-ЯӨҮЁ0-9 ,/()"'“”«».-]{8,160}\s+(?=\d+(?:\.\d+)?\s|[А-ЯӨҮЁ])/u, '')
+    .trim();
+
+  if (!cleaned || /^Хууль:/iu.test(cleaned)) {
+    return 'Энэ эх сурвалж тухайн асуудлын эрх, үүрэг, шаардлага гаргах үндэслэлийг тодруулахад ашиглагдана.';
+  }
+
+  return compactFallbackText(cleaned, 170);
 }
 
 function resolveQaLawAbbrev(title: string, lawId: string): string {
@@ -1359,9 +2707,7 @@ function isLaborDismissalOrWageQuery(query: string): boolean {
 function isPhoneTheftQuery(query: string): boolean {
   const normalized = normalizeForMatch(query);
   return (
-    /(утас|утс(?:аа|ыг|анд|наас|тай)?|гар\s*утас|iphone|android|imei|сим|sim)/i.test(
-      normalized,
-    ) &&
+    /(утас|утс(?:аа|ыг|анд|наас|тай)?|гар\s*утас|iphone|android|imei|сим|sim)/i.test(normalized) &&
     /(хулгай|алд|алга\s*бол|авчих|олж\s*авах|хайж\s*ол)/i.test(normalized)
   );
 }
@@ -1440,7 +2786,7 @@ function buildQaRiskGuidance(intent: QueryIntent, query: string = ''): string {
     switch (resolveTrafficScenario(query)) {
       case 'parking_hit_and_run':
       case 'hit_and_run':
-        return 'Ослын газраас зугтсан этгээдийг тодруулах баримт хурдан устах эрсдэлтэй тул камер, гэрч, ослын газрын тэмдэглэлээ хугацаа алдалгүй баталгаажуулах шаардлагатай.';
+        return 'Ослын газраас зугтсан этгээдийг тодруулах баримт хурдан устах эрсдэлтэй тул ослын газар дахь камер, гэрч, ослын газрын тэмдэглэлээ хугацаа алдалгүй баталгаажуулах шаардлагатай.';
       case 'opposite_lane_collision':
         return 'Эсрэг урсгал хэн зөрчсөн, мөргөлдсөн цэг зэрэг нь камер, гэрч, замын тэмдэглэгээгээр нотлогдох учир буруутай этгээдийг тогтоох баримтаа дутууруулахгүй байх хэрэгтэй.';
       case 'parking_collision':
@@ -1544,7 +2890,7 @@ function buildWeakContextClarificationResult(
   return {
     answer: [
       'Илүү зөв хариулахын тулд хэдэн мэдээлэл дутуу байна.',
-      'Одоогийн асуултаар салбар нь ерөнхийдөө танигдаж байгаа боловч шууд тодорхой зүйл, заалт хэлэхэд эх сурвалж хангалттай баттай биш байна. Буруу хууль оноохоос сэргийлж эхлээд дараах мэдээллийг тодруулъя.',
+      'Одоогийн асуултаар салбар нь ерөнхийдөө танигдаж байгаа боловч шууд тодорхой зүйл, заалт хэлэхэд эх сурвалж хангалттай баттай биш байна. Эх сурвалжийг баталгаатай онохын тулд эхлээд дараах мэдээллийг тодруулъя.',
       '',
       'Яг юу нэмж бичих вэ',
       ...missingFacts.map((fact, index) => `${index + 1}. ${fact}`),
@@ -1833,7 +3179,13 @@ function buildModeFallbackFromContext(
   confidence: number;
 } {
   if (mode === 'qa') {
-    return buildMongolianFallbackFromContext(query, chunks);
+    const fallbackIntent = classifyLegalIntent(query);
+    return buildDetailedQaFallbackFromContext(
+      query,
+      chunks,
+      fallbackIntent !== 'unknown' ? fallbackIntent : inferIntentFromChunks(chunks),
+      allowedArticles,
+    );
   }
 
   if (chunks.length === 0) {
@@ -2107,7 +3459,8 @@ function buildContextBlock(
         header += `\n🔗 ${url}`;
       }
 
-      return `${header}\n${chunk.document}`;
+      const cleanBody = cleanChunkDocumentForPrompt(String(chunk.document ?? ''));
+      return `${header}\n${cleanBody}`;
     })
     .join('\n\n---\n\n');
 
@@ -2231,47 +3584,6 @@ function parseConfidence(text: string): { answer: string; confidence: number } {
   }
 
   return { answer: text, confidence: 0.5 };
-}
-
-function buildMongolianFallbackFromContext(
-  query: string,
-  chunks: ChromaQueryResult[],
-): {
-  answer: string;
-  confidence: number;
-} {
-  if (chunks.length === 0) {
-    return { answer: NO_INFO_RESPONSE, confidence: 0 };
-  }
-
-  const topChunks = chunks.slice(0, 3);
-  const requestedArticle = extractRequestedArticleNumber(query);
-  const lines = topChunks.map((chunk, idx) => {
-    const title = String(chunk.metadata.title ?? `Эх сурвалж ${idx + 1}`);
-    const alignedArticle = extractQueryAlignedArticleNumber(query, chunk);
-    const articleNo =
-      alignedArticle && (!requestedArticle || alignedArticle === requestedArticle)
-        ? ` (${alignedArticle}-р зүйл)`
-        : '';
-    const excerpt = compactFallbackText(chunk.document, 260);
-    return `${idx + 1}. ${title}${articleNo}: ${excerpt}`;
-  });
-
-  const urls = Array.from(
-    new Set(
-      topChunks.map((chunk) => String(chunk.metadata.url ?? '')).filter((url) => url.length > 0),
-    ),
-  );
-
-  const maxScore = Math.max(0, ...topChunks.map((chunk) => Number(chunk.score) || 0));
-  const confidence = Math.round(Math.max(0.35, Math.min(0.9, maxScore)) * 100) / 100;
-
-  let answer = `LLM үйлчилгээ түр боломжгүй байна. Доорх контекстээс олдсон гол мэдээлэл:\n\n${lines.join('\n')}`;
-  if (urls.length > 0) {
-    answer += `\n\nЭх сурвалж:\n${urls.join('\n')}`;
-  }
-
-  return { answer, confidence };
 }
 
 function compactFallbackText(text: string, maxLen: number): string {
@@ -2618,7 +3930,7 @@ function buildIntentGuidanceFallback(
     '',
     '4. Эрсдэл, анхаарах нөхцөл',
     riskGuidance,
-    'Контекст сул үед дээрх заалтуудыг хамгийн сүүлийн найруулгаар нь давхар шалгаж хэрэгжүүлнэ.',
+    'Хуулийн заалт хэрэглэхдээ тухайн гэрээ, тушаал, акт, мэдэгдэл болон хугацааны баримттайгаа заавал тулгаж шалгана.',
     '',
     '**Практик зөвлөгөө**',
     ...practicalTips.map((tip) => `- ${tip}`),
@@ -2832,15 +4144,33 @@ function matchesIntentInCorpus(intent: QueryIntent, corpus: string): boolean {
     return true;
   }
 
+  // Off-topic criminal articles (money laundering, human trafficking, terrorism,
+  // state security, etc.) bleed through into traffic / contract / labor results
+  // because the embedding picks up shared legal terminology. Reject them
+  // unconditionally for non-crime intents.
+  if (intent !== 'crime' && isOffTopicCriminalChunk(corpus)) {
+    return false;
+  }
+
   switch (intent) {
     case 'crime':
       return /(эрүүгийн|гэмт\s+хэрэг|хулгай|залилан|залилах|авлига|хүчирхийлэл|хууран|мэхл)/i.test(
         corpus,
       );
-    case 'traffic':
-      return /(замын\s+хөдөлгөөн|тээврийн\s+хэрэгсэл|жолоо|жолоод|жолооч|согтуур|согтуу|зөрчил|эрүүгийн|гэмт\s+хэрэг|осол|хариуцлага|торгууль|мөргө|мөргөлд|шүрг|шүргэ|зугт|ослын\s+газар|эсрэг\s+урсгал|зогсоол|паркинг|авто\s*даатгал|каско)/i.test(
+    case 'traffic': {
+      const hasTrafficCore =
+        /(замын\s+хөдөлгөөн|тээврийн\s+хэрэгсэл|жолоо|жолоод|жолооч|согтуур|согтуу|осол|мөргө|мөргөлд|шүрг|шүргэ|зугт|ослын\s+газар|эсрэг\s+урсгал|зогсоол|паркинг|авто\s*даатгал|каско)/i.test(
+          corpus,
+        );
+      const hasTrafficLiabilityWord = /(зөрчил|торгууль|хариуцлага|нөхөн\s*төлбөр|даатгал)/i.test(
         corpus,
       );
+      const hasCriminalWord = /(эрүүгийн|гэмт\s+хэрэг|ял|хорих|тэнсэх)/i.test(corpus);
+      // Keep a chunk if it mentions a traffic-specific term, OR if it ties a
+      // generic liability/criminal reference to traffic context. Pure
+      // criminal-only chunks (no traffic word) are rejected.
+      return hasTrafficCore || (hasTrafficLiabilityWord && hasCriminalWord);
+    }
     case 'election':
       return /(сонгууль|сонгогч|сонгох\s+эрх|санал\s+өгөх|үндсэн\s+хууль|18\s*нас|арван\s*найм)/i.test(
         corpus,
@@ -2860,6 +4190,19 @@ function matchesIntentInCorpus(intent: QueryIntent, corpus: string): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Returns true for criminal-law chunks that almost always belong to other
+ * domains — money laundering, trafficking, terrorism, weapons, organised
+ * crime, state-security articles. Used to keep these out of traffic / labor /
+ * contract / family answers where the embedding model occasionally surfaces
+ * them due to shared legal vocabulary ("хариуцлага", "ял", etc.).
+ */
+function isOffTopicCriminalChunk(corpus: string): boolean {
+  return /(мөнгө\s+угаах|хүн\s+худалдаалах|терроризм|террорист|зэвсэгт\s+халдлага|улсын\s+нууц|төрийн\s+эсрэг|зохион\s+байгуулалттай\s+гэмт|хар\s+тамхи|мансууруулах\s+бодис|олон\s+нийтийн\s+аюулгүй\s+байдлын\s+эсрэг|хүн\s+худалдаалах\s+гэмт)/i.test(
+    corpus,
+  );
 }
 
 function inferIntentFromChunks(chunks: ChromaQueryResult[]): QueryIntent {
@@ -3122,22 +4465,11 @@ function enforceArticleGrounding(
 function upsertArticleSection(answer: string, allowedArticles: string[]): string {
   const sectionBody =
     allowedArticles.length > 0
-      ? `- ${allowedArticles.map((article) => `${article} дугаар зүйл`).join(', ')}`
-      : '- Контекстэд баталгаатай зүйл илрээгүй.';
-  const section = `4. Хуулийн заалт:\n${sectionBody}`;
-
-  const sectionStart = answer.search(/(?:^|\n)4\.\s*/i);
-  if (sectionStart >= 0) {
-    const sourceStart = answer.search(/\nЭх\s+сурвалж\s*:/i);
-    if (sourceStart > sectionStart) {
-      const prefix = answer.slice(0, sectionStart).trimEnd();
-      const suffix = answer.slice(sourceStart).trimStart();
-      return `${prefix}\n\n${section}\n\n${suffix}`.trim();
-    }
-
-    const prefix = answer.slice(0, sectionStart).trimEnd();
-    return `${prefix}\n\n${section}`.trim();
-  }
+      ? `Эх сурвалжид ${allowedArticles
+          .map((article) => `${article} дугаар зүйл`)
+          .join(', ')} холбогдож байгаа тул эдгээр заалтыг зөвхөн дугаарын жагсаалт биш, таны бодит нөхцөлд үүсэх эрх, үүрэг, шаардлагатай нь холбож тайлбарлах хэрэгтэй.`
+      : 'Эх сурвалжаас энэ нөхцөлд шууд хэрэглэх тодорхой зүйл илрээгүй тул хуулийн зүйл дугаарыг зохиож нэмэхгүй. Ийм үед баримтаа бүрдүүлж, эрх бүхий байгууллага эсвэл нөгөө талаас бичгээр тодруулга авах нь илүү найдвартай.';
+  const section = `**Хуулийн тайлбар**\n${sectionBody}`;
 
   return `${answer.trim()}\n\n${section}`;
 }

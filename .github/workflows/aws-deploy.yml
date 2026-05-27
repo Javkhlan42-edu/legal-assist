@@ -1,0 +1,217 @@
+name: AWS Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - deploy/aws-ec2-ecr-https
+  workflow_dispatch:
+    inputs:
+      domain_name:
+        description: Domain name to connect through Route53/ACM
+        required: false
+        default: hop-on.dev
+      instance_type:
+        description: EC2 instance type
+        required: false
+        default: t3.micro
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: legal-assist
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-southeast-1' }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  DOMAIN_NAME: ${{ github.event.inputs.domain_name || 'hop-on.dev' }}
+  INSTANCE_TYPE: ${{ github.event.inputs.instance_type || 't3.micro' }}
+  GIT_REF: ${{ github.ref_name }}
+
+jobs:
+  deploy:
+    name: Build, Push, Deploy
+    runs-on: [self-hosted, legal-assist-deploy]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate AWS account
+        run: |
+          set -euo pipefail
+          ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          if [ -n "${AWS_ACCOUNT_ID}" ] && [ "$ACCOUNT" != "$AWS_ACCOUNT_ID" ]; then
+            echo "Expected AWS account $AWS_ACCOUNT_ID, got $ACCOUNT" >&2
+            exit 1
+          fi
+          echo "AWS account: $ACCOUNT"
+
+      - name: Create ECR repositories
+        run: |
+          set -euo pipefail
+          for repo in legal-assist-api legal-assist-web legal-assist-worker; do
+            aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 ||
+              aws ecr create-repository \
+                --repository-name "$repo" \
+                --image-scanning-configuration scanOnPush=true \
+                --encryption-configuration encryptionType=AES256 >/dev/null
+          done
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push images
+        run: |
+          set -euo pipefail
+          REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          API_IMAGE="$REGISTRY/legal-assist-api:$IMAGE_TAG"
+          WEB_IMAGE="$REGISTRY/legal-assist-web:$IMAGE_TAG"
+          WORKER_IMAGE="$REGISTRY/legal-assist-worker:$IMAGE_TAG"
+
+          docker buildx create --use --name legal-assist-builder || docker buildx use legal-assist-builder
+          docker buildx build --push -f docker/api.Dockerfile -t "$API_IMAGE" .
+          docker buildx build --push -f docker/worker.Dockerfile -t "$WORKER_IMAGE" .
+          docker buildx build --push -f docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_URL= -t "$WEB_IMAGE" .
+
+          {
+            echo "API_IMAGE=$API_IMAGE"
+            echo "WEB_IMAGE=$WEB_IMAGE"
+            echo "WORKER_IMAGE=$WORKER_IMAGE"
+          } >> "$GITHUB_ENV"
+
+      - name: Deploy images on EC2 host
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          APP_DIR="/opt/legal-assist"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+
+          sudo mkdir -p "$APP_DIR"
+          sudo chown -R "$USER:$USER" "$APP_DIR"
+
+          if [ ! -d "$APP_DIR/.git" ]; then
+            rm -rf "$APP_DIR"
+            git clone "$REPO_URL" "$APP_DIR"
+          fi
+
+          cd "$APP_DIR"
+          git remote set-url origin "$REPO_URL"
+          git fetch origin "$GIT_REF"
+          git checkout "$GIT_REF"
+          git pull --ff-only origin "$GIT_REF"
+
+          if [ -n "$PRODUCTION_ENV" ]; then
+            printf '%s\n' "$PRODUCTION_ENV" > .env
+          elif [ ! -f .env ]; then
+            echo "PRODUCTION_ENV GitHub secret is empty and $APP_DIR/.env does not exist." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+
+          path = Path(".env")
+          existing = path.read_text().splitlines() if path.exists() else []
+          existing_values = {}
+          for line in existing:
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key, value = line.split("=", 1)
+                  existing_values[key.strip()] = value
+
+          db_password = existing_values.get("DB_PASSWORD", "")
+          database_url = existing_values.get("DATABASE_URL", "")
+          if not database_url and db_password:
+              database_url = f"postgresql://postgres:{quote(db_password, safe='')}@postgres:5432/legal_chatbot"
+          def usable_openai_key(value: str) -> bool:
+              normalized = value.strip()
+              return (
+                  normalized.startswith("sk-")
+                  and len(normalized) >= 40
+                  and "your-production-key" not in normalized
+                  and "..." not in normalized
+              )
+
+          existing_openai_key = existing_values.get("OPENAI_API_KEY", "").strip()
+          secret_openai_key = os.environ.get("OPENAI_API_KEY_SECRET", "").strip()
+          if usable_openai_key(secret_openai_key):
+              openai_api_key = secret_openai_key
+          elif usable_openai_key(existing_openai_key):
+              openai_api_key = existing_openai_key
+          else:
+              openai_api_key = ""
+          if not openai_api_key:
+              raise SystemExit("OPENAI_API_KEY is missing. Add it to PRODUCTION_ENV or GitHub Secrets before deploying.")
+
+          overrides = {
+              "API_IMAGE": os.environ["API_IMAGE"],
+              "WEB_IMAGE": os.environ["WEB_IMAGE"],
+              "WORKER_IMAGE": os.environ["WORKER_IMAGE"],
+              "AWS_REGION": os.environ["AWS_REGION"],
+              "DOMAIN_NAME": os.environ["DOMAIN_NAME"],
+              "CORS_ORIGIN": "https://hop-on.dev,https://www.hop-on.dev,http://hop-on.dev,http://www.hop-on.dev,http://legal-assist-alb-1796940379.ap-southeast-1.elb.amazonaws.com",
+              "NEXT_PUBLIC_API_URL": "",
+              "VECTOR_DB_PROVIDER": "pgvector",
+              "VECTOR_DB_FALLBACK": "false",
+              "EMBEDDING_PROVIDER": "openai",
+              "EMBEDDING_DIMENSION": "3072",
+              "OPENAI_CHAT_MODEL": "gpt-5.4",
+              "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
+              "OPENAI_TIMEOUT_MS": "180000",
+              "RETRIEVAL_SPEED_MODE": "balanced",
+              "INCLUDE_RELATED_CASES": "auto",
+              "RETRIEVAL_TIMEOUT_MS": "180000",
+              "GENERATION_TIMEOUT_MS": "180000",
+              "RESPONSE_LATENCY_BUDGET_MS": "240000",
+              "RETRIEVAL_CACHE_ENABLED": "true",
+              "RETRIEVAL_CACHE_TTL_SECONDS": "86400",
+              "RETRIEVAL_CACHE_MIN_QUALITY": "0.55",
+              "RETRIEVAL_CACHE_VERSION": "retrieval-context-v1",
+              "USE_CROSS_RERANKER": "false",
+              "OPENAI_API_KEY": openai_api_key,
+          }
+          if database_url:
+              overrides["DATABASE_URL"] = database_url
+          kept = []
+          for line in existing:
+              key = line.split("=", 1)[0].strip() if "=" in line else ""
+              if key not in overrides:
+                  kept.append(line)
+          for key, value in overrides.items():
+              kept.append(f"{key}={value}")
+          path.write_text("\n".join(kept) + "\n")
+          PY
+
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${API_IMAGE%%/*}"
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml pull
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml up -d --remove-orphans
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api \
+            node scripts/apply-sql-migration.mjs migrations/007_retrieval_postgres_indexes.sql
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api \
+            node scripts/apply-sql-migration.mjs migrations/008_create_retrieval_cache.sql
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api \
+            node scripts/check-retrieval-db.mjs
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml exec -T api \
+            node scripts/check-runtime-config.mjs
+          # Nginx resolves Docker service IPs at startup. Restart it after
+          # web/api updates so it does not keep a stale upstream IP.
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml restart nginx
+          docker compose --env-file .env -f docker/docker-compose.ecr.yml ps
+
+      - name: Public health check
+        run: |
+          set -euo pipefail
+          URL="https://${DOMAIN_NAME}/health"
+          echo "Checking $URL"
+          curl --fail --retry 20 --retry-delay 10 "$URL"

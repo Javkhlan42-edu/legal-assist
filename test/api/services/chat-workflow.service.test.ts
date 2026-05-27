@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@legal-chatbot/shared';
-import { planChatWorkflow } from '../../src/services/chat-workflow.service.ts';
-import type { MessageRecord } from '../../src/repositories/conversation.repository.ts';
+import {
+  planChatWorkflow,
+  type FollowUpHint,
+} from '../../../apps/api/src/services/chat-workflow.service.ts';
+import type { MessageRecord } from '../../../apps/api/src/repositories/conversation.repository.ts';
 
 const LABOR_LAW_ID = '16230709635751';
 
@@ -74,7 +77,7 @@ function makeLaborDismissalSnapshotRecord(): MessageRecord {
 }
 
 describe('ChatWorkflowService', () => {
-  it('continues a short evidence follow-up from the previous legal snapshot while still retrieving fresh sources', () => {
+  it('continues a short evidence follow-up from the previous legal snapshot without rerunning retrieval', () => {
     const plan = planChatWorkflow({
       message: 'Ямар баримт бүрдүүлэх хэрэгтэй вэ?',
       history: makeLaborDismissalHistory(),
@@ -86,8 +89,8 @@ describe('ChatWorkflowService', () => {
     expect(plan.intent).toBe('labor');
     expect(plan.usesHistoryContext).toBe(true);
     expect(plan.carryForwardMode).toBe('reuse_same_law');
-    expect(plan.shouldSkipRetrieval).toBe(false);
-    expect(plan.nodes).toContain('retrieve_node');
+    expect(plan.shouldSkipRetrieval).toBe(true);
+    expect(plan.nodes).not.toContain('retrieve_node');
     expect(plan.carryForwardChunks.length).toBeGreaterThan(0);
   });
 
@@ -102,8 +105,8 @@ describe('ChatWorkflowService', () => {
     expect(plan.scope.scope).toBe('legal');
     expect(plan.intent).toBe('labor');
     expect(plan.carryForwardMode).toBe('reuse_same_law');
-    expect(plan.shouldSkipRetrieval).toBe(false);
-    expect(plan.nodes).toContain('retrieve_node');
+    expect(plan.shouldSkipRetrieval).toBe(true);
+    expect(plan.nodes).not.toContain('retrieve_node');
   });
 
   it('combines supplemental bank loan facts with the previous question for retrieval', () => {
@@ -177,5 +180,109 @@ describe('ChatWorkflowService', () => {
     expect(plan.carryForwardMode).toBe('full_refresh');
     expect(plan.shouldSkipRetrieval).toBe(false);
     expect(plan.query).not.toContain('Банкнаас авсан зээл');
+  });
+
+  describe('followUpHint integration', () => {
+    it('returns greeting early response when classifier confidently flags greeting and no snapshot is reusable', () => {
+      const hint: FollowUpHint = { kind: 'greeting', confidence: 0.95 };
+
+      const plan = planChatWorkflow({
+        message: 'Сайн уу',
+        history: [],
+        messageRecords: [],
+        followUpHint: hint,
+      });
+
+      expect(plan.earlyResponse).toBeDefined();
+      expect(plan.earlyResponse?.mode).toBe('fallback-general');
+      expect(plan.shouldSkipRetrieval).toBe(true);
+      expect(plan.nodes).toContain('out_of_scope_node');
+      expect(plan.carryForwardMode).toBe('full_refresh');
+    });
+
+    it('returns out-of-scope early response when classifier confidently flags out_of_scope with no snapshot', () => {
+      const hint: FollowUpHint = { kind: 'out_of_scope', confidence: 0.9 };
+
+      const plan = planChatWorkflow({
+        message: 'Энэ кино санал болго',
+        history: [],
+        messageRecords: [],
+        followUpHint: hint,
+      });
+
+      expect(plan.earlyResponse).toBeDefined();
+      expect(plan.earlyResponse?.mode).toBe('no-info');
+      expect(plan.shouldSkipRetrieval).toBe(true);
+    });
+
+    it('forces reuse_same_law and history carry-forward when hint says same_topic with prior snapshot', () => {
+      const hint: FollowUpHint = { kind: 'same_topic', confidence: 0.85 };
+
+      const plan = planChatWorkflow({
+        message: 'Тэгээд яаж шийдэх вэ?',
+        history: makeLaborDismissalHistory(),
+        messageRecords: [makeLaborDismissalSnapshotRecord()],
+        followUpHint: hint,
+      });
+
+      expect(plan.earlyResponse).toBeUndefined();
+      expect(plan.scope.scope).toBe('legal');
+      expect(plan.intent).toBe('labor');
+      expect(plan.usesHistoryContext).toBe(true);
+      expect(plan.carryForwardMode).toBe('reuse_same_law');
+      expect(plan.carryForwardChunks.length).toBeGreaterThan(0);
+      expect(plan.shouldSkipRetrieval).toBe(true);
+      expect(plan.nodes).not.toContain('retrieve_node');
+    });
+
+    it('forces reuse_same_law for detail_followup hint even when the surface form does not match regex patterns', () => {
+      const hint: FollowUpHint = { kind: 'detail_followup', confidence: 0.8 };
+
+      const plan = planChatWorkflow({
+        message: 'Үүнийг яаж тооцоолох вэ?',
+        history: makeLaborDismissalHistory(),
+        messageRecords: [makeLaborDismissalSnapshotRecord()],
+        followUpHint: hint,
+      });
+
+      expect(plan.earlyResponse).toBeUndefined();
+      expect(plan.carryForwardMode).toBe('reuse_same_law');
+      expect(plan.usesHistoryContext).toBe(true);
+      expect(plan.shouldSkipRetrieval).toBe(true);
+      expect(plan.nodes).not.toContain('retrieve_node');
+    });
+
+    it('wipes carry-forward when hint says new_topic even if regex would have kept it', () => {
+      const hint: FollowUpHint = { kind: 'new_topic', confidence: 0.85 };
+
+      const plan = planChatWorkflow({
+        message: 'Машинаа худалдсан гэрээ хүчингүй болох уу?',
+        history: makeLaborDismissalHistory(),
+        messageRecords: [makeLaborDismissalSnapshotRecord()],
+        followUpHint: hint,
+      });
+
+      expect(plan.earlyResponse).toBeUndefined();
+      expect(plan.carryForwardMode).toBe('full_refresh');
+      expect(plan.carryForwardChunks.length).toBe(0);
+      expect(plan.usesHistoryContext).toBe(false);
+    });
+
+    it('ignores low-confidence hint and falls back to regex heuristics', () => {
+      const hint: FollowUpHint = { kind: 'new_topic', confidence: 0.2 };
+
+      const plan = planChatWorkflow({
+        message: 'Ямар баримт бүрдүүлэх хэрэгтэй вэ?',
+        history: makeLaborDismissalHistory(),
+        messageRecords: [makeLaborDismissalSnapshotRecord()],
+        followUpHint: hint,
+      });
+
+      // Regex path should still detect this as a labor dismissal follow-up.
+      expect(plan.usesHistoryContext).toBe(true);
+      expect(plan.carryForwardMode).toBe('reuse_same_law');
+      expect(plan.shouldSkipRetrieval).toBe(true);
+      expect(plan.nodes).not.toContain('retrieve_node');
+    });
   });
 });

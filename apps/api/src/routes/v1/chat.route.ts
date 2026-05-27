@@ -18,14 +18,30 @@ import {
   getConversationForUser,
   type MessageRecord,
 } from '../../repositories/conversation.repository.js';
-import { generate, type GenerationResult } from '../../services/generation.service.js';
+import {
+  getRetrievalCacheEntry,
+  isRetrievalCacheEligibleQuestion,
+  normalizeRetrievalCacheQuestion,
+  upsertRetrievalCacheEntry,
+  type RetrievalCacheEntry,
+} from '../../repositories/retrieval-cache.repository.js';
+import {
+  generate,
+  cleanupAnswerStructure,
+  type GenerationResult,
+} from '../../services/generation.service.js';
 import {
   classifyLegalIntent,
   rewriteQuery,
   type QueryIntent,
 } from '../../services/query-rewrite.service.js';
-import { search } from '../../services/retrieval.service.js';
-import { planChatWorkflow, type WorkflowEarlyResponse } from '../../services/chat-workflow.service.js';
+import type { AppEnv } from '../../config/env.js';
+import { search, type RetrievalQuality, type RetrievalResult, type RetrievalStageTiming } from '../../services/retrieval.service.js';
+import { planChatWorkflow, type WorkflowEarlyResponse, type WorkflowPlan } from '../../services/chat-workflow.service.js';
+import {
+  classifyFollowUp,
+  type FollowUpHint,
+} from '../../services/follow-up-classifier.service.js';
 import { evaluateAnswerQuality } from '../../services/answer-quality.service.js';
 import type { ChromaQueryResult } from '../../lib/vector-db.js';
 
@@ -61,10 +77,13 @@ interface ChatResponseDto extends ChatResponse {
     latencyMs: number;
     workflowMs?: number;
     retrievalMs?: number;
+    retrievalStages?: RetrievalStageTiming;
     generationMs?: number;
     persistenceMs?: number;
     retrievalTimedOut?: boolean;
     generationTimedOut?: boolean;
+    cacheHit?: boolean;
+    cacheKind?: 'session_retrieval_exact_question' | 'global_retrieval_exact_question';
   };
   quality: ChatQualityMetrics;
 }
@@ -85,12 +104,36 @@ interface AssistantMetadataBuildParams {
   preferredLawIds?: string[];
   contextChunks?: ChromaQueryResult[];
   retrievalQuality?: unknown;
+  retrievalTiming?: RetrievalStageTiming;
   quality?: ChatQualityMetrics;
   keywordTerms?: string[];
   primaryDomain?: string;
+  followUpHint?: FollowUpHint | null;
+}
+
+/**
+ * Run the LLM-driven follow-up classifier, swallowing any failures so the
+ * pipeline stays resilient. Returns null when the classifier is disabled, the
+ * conversation has no history, or the call fails.
+ */
+async function maybeClassifyFollowUp(
+  env: Parameters<typeof classifyFollowUp>[0]['env'],
+  message: string,
+  history: ChatMessage[],
+): Promise<FollowUpHint | null> {
+  if (history.length === 0) {
+    return null;
+  }
+
+  try {
+    return await classifyFollowUp({ env, message, history });
+  } catch {
+    return null;
+  }
 }
 
 const MIN_CASE_UI_SCORE = 0.52;
+const MIN_CASE_AUTO_UI_SCORE = 0.68;
 const MIN_CASE_FALLBACK_SCORE = 0.58;
 const RETRIEVAL_QUALITY_WARN_THRESHOLD = 0.45;
 
@@ -163,10 +206,12 @@ export function registerChatRoute(app: FastifyInstance) {
       }
 
       const workflowStart = Date.now();
+      const followUpHint = await maybeClassifyFollowUp(app.env, message, history);
       const workflowPlan = planChatWorkflow({
         message,
         history,
         messageRecords: restoredMessageRecords,
+        followUpHint: followUpHint ?? undefined,
       });
       const workflowLatencyMs = Date.now() - workflowStart;
 
@@ -185,6 +230,7 @@ export function registerChatRoute(app: FastifyInstance) {
           carryForwardMode: workflowPlan.carryForwardMode,
           workflowNodes: workflowPlan.nodes,
           restoredHistory: history.length,
+          followUpHint: followUpHint ?? null,
           workflowLatencyMs,
         },
         'Chat request received',
@@ -217,6 +263,7 @@ export function registerChatRoute(app: FastifyInstance) {
               scope: workflowPlan.scope.scope,
               intent: workflowPlan.intent,
               carryForwardMode: workflowPlan.carryForwardMode,
+              followUpHint,
             }),
           );
         } catch (persistenceErr) {
@@ -235,8 +282,41 @@ export function registerChatRoute(app: FastifyInstance) {
       let retrievalLatencyMs = 0;
       let retrievalTimedOut = false;
       let retrievalQuality: Awaited<ReturnType<typeof search>>['retrievalQuality'] | undefined;
+      let retrievalCacheKind: ChatResponseDto['usage']['cacheKind'] | undefined;
 
-      if (!workflowPlan.shouldSkipRetrieval) {
+      const sessionCachedRetrieval = buildSessionRetrievalCacheResult(
+        message,
+        restoredMessageRecords,
+      );
+      if (sessionCachedRetrieval) {
+        retrievalResult = sessionCachedRetrieval;
+        retrievalQuality = retrievalResult.retrievalQuality;
+        retrievalCacheKind = 'session_retrieval_exact_question';
+        request.log.info(
+          {
+            userId: authUser.id,
+            conversationId,
+            sources: retrievalResult.sources.length,
+            laws: retrievalResult.relatedLaws.length,
+            cases: retrievalResult.relatedCases.length,
+          },
+          'Session retrieval cache hit',
+        );
+      } else {
+        const globalCachedRetrieval = await maybeGetGlobalRetrievalCache({
+          env: app.env,
+          message,
+          workflowPlan,
+          requestLog: request.log,
+        });
+        if (globalCachedRetrieval) {
+          retrievalResult = globalCachedRetrieval;
+          retrievalQuality = retrievalResult.retrievalQuality;
+          retrievalCacheKind = 'global_retrieval_exact_question';
+        }
+      }
+
+      if (!retrievalResult && !workflowPlan.shouldSkipRetrieval) {
         const retrievalStart = Date.now();
         const retrievalPromise = search(app.env, workflowPlan.query, {
           intentOverride: workflowPlan.intent,
@@ -287,6 +367,7 @@ export function registerChatRoute(app: FastifyInstance) {
           retrievalQualityBand: retrievalQuality?.qualityBand ?? 'unknown',
           retrievalIntentPrecision: retrievalQuality?.intentPrecision ?? null,
           retrievalCanonicalCoverage: retrievalQuality?.canonicalCoverage ?? null,
+          retrievalTiming: retrievalResult?.retrievalTiming ?? null,
           retrievalTimedOut,
         },
         'Retrieval complete',
@@ -313,16 +394,39 @@ export function registerChatRoute(app: FastifyInstance) {
         ? filterRelatedCasesForResponse(retrievalResult.relatedCases, {
             hasRelatedLaws: retrievalResult.relatedLaws.length > 0,
             intent: requestIntent,
+            explicitCaseAsk: isExplicitCaseQuestion(message),
           })
         : filterRelatedCasesForResponse(workflowPlan.carryForwardRelatedCases, {
             hasRelatedLaws: workflowPlan.carryForwardRelatedLaws.length > 0,
             intent: requestIntent,
+            explicitCaseAsk: isExplicitCaseQuestion(message),
           });
+
+      if (!retrievalCacheKind && retrievalResult) {
+        await maybeStoreGlobalRetrievalCache({
+          env: app.env,
+          message,
+          workflowPlan,
+          retrievalResult: {
+            ...retrievalResult,
+            relatedCases: filteredRelatedCases,
+          },
+          requestLog: request.log,
+        });
+      }
 
       const generationStart = Date.now();
       const generationContextChunks =
         retrievalResult?.contextChunks ?? workflowPlan.carryForwardChunks;
       const generationQuery = buildContextualGenerationQuery(message, workflowPlan.relevantHistory);
+      const generationOptions = {
+        alreadyReranked: true,
+        detailSubIntent: workflowPlan.detailSubIntent,
+        answerStyle:
+          workflowPlan.shouldSkipRetrieval && workflowPlan.carryForwardMode === 'reuse_same_law'
+            ? 'follow_up_freeform'
+            : 'qa_contract',
+      } as const;
       let generationTimedOut = false;
       const generationOutcome = await resolveWithTimeout(
         generate(
@@ -331,7 +435,7 @@ export function registerChatRoute(app: FastifyInstance) {
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          generationOptions,
         ),
         app.env.GENERATION_TIMEOUT_MS,
       );
@@ -348,14 +452,18 @@ export function registerChatRoute(app: FastifyInstance) {
           },
           'Generation timed out; using deterministic grounded fallback',
         );
-        generationResult = await generate(
+        const fallbackGeneration = await generate(
           { ...app.env, OPENAI_API_KEY: '' },
           generationQuery,
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          generationOptions,
         );
+        generationResult = {
+          ...fallbackGeneration,
+          answer: cleanupAnswerStructure(fallbackGeneration.answer),
+        };
       } else {
         generationResult = generationOutcome.value;
       }
@@ -455,13 +563,15 @@ export function registerChatRoute(app: FastifyInstance) {
             retrievalQuery: workflowPlan.query,
             preferredLawIds: workflowPlan.preferredLawIds,
             contextChunks: retrievalResult?.contextChunks ?? workflowPlan.carryForwardChunks,
-          retrievalQuality,
-          quality,
-          keywordTerms: workflowPlan.keywordProfile.topicalTerms,
+            retrievalQuality,
+            retrievalTiming: retrievalResult?.retrievalTiming,
+            quality,
+            keywordTerms: workflowPlan.keywordProfile.topicalTerms,
             primaryDomain:
               workflowPlan.keywordProfile.primaryDomain !== 'unknown'
                 ? workflowPlan.keywordProfile.primaryDomain
                 : workflowPlan.intent,
+            followUpHint,
           }),
         );
       } catch (persistenceErr) {
@@ -490,10 +600,13 @@ export function registerChatRoute(app: FastifyInstance) {
           latencyMs,
           workflowMs: workflowLatencyMs,
           retrievalMs: retrievalLatencyMs,
+          retrievalStages: retrievalResult?.retrievalTiming,
           generationMs: generationLatencyMs,
           persistenceMs: persistenceLatencyMs,
           retrievalTimedOut,
           generationTimedOut,
+          cacheHit: Boolean(retrievalCacheKind),
+          cacheKind: retrievalCacheKind,
         },
         quality,
       };
@@ -612,27 +725,31 @@ export function registerChatRoute(app: FastifyInstance) {
         conversationId,
       });
 
-      const existingConversation = requestedConversationId
-        ? await getConversationById(conversationId)
-        : null;
+      if (requestedConversationId) {
+        const [existingConversation, restoredConversation] = await Promise.all([
+          getConversationById(conversationId),
+          getConversationForUser(conversationId, authUser.id),
+        ]);
 
-      if (existingConversation && existingConversation.userId !== authUser.id) {
-        throw new Error('CONVERSATION_OWNERSHIP_MISMATCH');
-      }
+        if (existingConversation && existingConversation.userId !== authUser.id) {
+          throw new Error('CONVERSATION_OWNERSHIP_MISMATCH');
+        }
 
-      if (requestedConversationId && existingConversation) {
-        const restoredConversation = await getConversationForUser(conversationId, authUser.id);
-        restoredMessageRecords = restoredConversation.messages;
-        if (history.length === 0) {
-          history = toChatHistory(restoredMessageRecords);
+        if (existingConversation) {
+          restoredMessageRecords = restoredConversation.messages;
+          if (history.length === 0) {
+            history = toChatHistory(restoredMessageRecords);
+          }
         }
       }
 
       const workflowStart = Date.now();
+      const followUpHint = await maybeClassifyFollowUp(app.env, message, history);
       const workflowPlan = planChatWorkflow({
         message,
         history,
         messageRecords: restoredMessageRecords,
+        followUpHint: followUpHint ?? undefined,
       });
       const workflowLatencyMs = Date.now() - workflowStart;
 
@@ -651,6 +768,7 @@ export function registerChatRoute(app: FastifyInstance) {
           carryForwardMode: workflowPlan.carryForwardMode,
           workflowNodes: workflowPlan.nodes,
           restoredHistory: history.length,
+          followUpHint: followUpHint ?? null,
           streaming: true,
           workflowLatencyMs,
         },
@@ -691,6 +809,7 @@ export function registerChatRoute(app: FastifyInstance) {
               scope: workflowPlan.scope.scope,
               intent: workflowPlan.intent,
               carryForwardMode: workflowPlan.carryForwardMode,
+              followUpHint,
             }),
           );
         } catch (persistenceErr) {
@@ -719,8 +838,42 @@ export function registerChatRoute(app: FastifyInstance) {
       let retrievalLatencyMs = 0;
       let retrievalTimedOut = false;
       let retrievalQuality: Awaited<ReturnType<typeof search>>['retrievalQuality'] | undefined;
+      let retrievalCacheKind: ChatResponseDto['usage']['cacheKind'] | undefined;
 
-      if (!workflowPlan.shouldSkipRetrieval) {
+      const sessionCachedRetrieval = buildSessionRetrievalCacheResult(
+        message,
+        restoredMessageRecords,
+      );
+      if (sessionCachedRetrieval) {
+        retrievalResult = sessionCachedRetrieval;
+        retrievalQuality = retrievalResult.retrievalQuality;
+        retrievalCacheKind = 'session_retrieval_exact_question';
+        request.log.info(
+          {
+            userId: authUser.id,
+            conversationId,
+            sources: retrievalResult.sources.length,
+            laws: retrievalResult.relatedLaws.length,
+            cases: retrievalResult.relatedCases.length,
+            streaming: true,
+          },
+          'Session retrieval cache hit',
+        );
+      } else {
+        const globalCachedRetrieval = await maybeGetGlobalRetrievalCache({
+          env: app.env,
+          message,
+          workflowPlan,
+          requestLog: request.log,
+        });
+        if (globalCachedRetrieval) {
+          retrievalResult = globalCachedRetrieval;
+          retrievalQuality = retrievalResult.retrievalQuality;
+          retrievalCacheKind = 'global_retrieval_exact_question';
+        }
+      }
+
+      if (!retrievalResult && !workflowPlan.shouldSkipRetrieval) {
         const retrievalStart = Date.now();
         const retrievalPromise = search(app.env, workflowPlan.query, {
           intentOverride: workflowPlan.intent,
@@ -772,6 +925,7 @@ export function registerChatRoute(app: FastifyInstance) {
           retrievalQualityBand: retrievalQuality?.qualityBand ?? 'unknown',
           retrievalIntentPrecision: retrievalQuality?.intentPrecision ?? null,
           retrievalCanonicalCoverage: retrievalQuality?.canonicalCoverage ?? null,
+          retrievalTiming: retrievalResult?.retrievalTiming ?? null,
           retrievalTimedOut,
           streaming: true,
         },
@@ -800,11 +954,52 @@ export function registerChatRoute(app: FastifyInstance) {
         ? filterRelatedCasesForResponse(retrievalResult.relatedCases, {
             hasRelatedLaws: retrievalResult.relatedLaws.length > 0,
             intent: requestIntent,
+            explicitCaseAsk: isExplicitCaseQuestion(message),
           })
         : filterRelatedCasesForResponse(workflowPlan.carryForwardRelatedCases, {
             hasRelatedLaws: workflowPlan.carryForwardRelatedLaws.length > 0,
             intent: requestIntent,
+            explicitCaseAsk: isExplicitCaseQuestion(message),
           });
+
+      if (!retrievalCacheKind && retrievalResult) {
+        await maybeStoreGlobalRetrievalCache({
+          env: app.env,
+          message,
+          workflowPlan,
+          retrievalResult: {
+            ...retrievalResult,
+            relatedCases: filteredRelatedCases,
+          },
+          requestLog: request.log,
+        });
+      }
+
+      // Push retrieval preview to the client so Related Laws / Cases / Sources
+      // cards render immediately while the LLM is still generating the answer.
+      // This is best-effort — if the generation later produces a `no-info`
+      // result the final `complete` event will overwrite these previews with
+      // an empty snapshot, which is the existing contract.
+      const previewSources = retrievalResult?.sources ?? workflowPlan.carryForwardSources;
+      const previewRelatedLaws =
+        retrievalResult?.relatedLaws ?? workflowPlan.carryForwardRelatedLaws;
+      const previewSourcesUsed =
+        retrievalResult?.sourcesUsed ?? previewSources.length;
+      if (
+        previewSources.length > 0 ||
+        previewRelatedLaws.length > 0 ||
+        filteredRelatedCases.length > 0
+      ) {
+        await sendEvent({
+          type: 'retrieval',
+          sources: previewSources,
+          relatedLaws: previewRelatedLaws,
+          relatedCases: filteredRelatedCases,
+          sourcesUsed: previewSourcesUsed,
+          retrievalMs: retrievalLatencyMs,
+          retrievalStages: retrievalResult?.retrievalTiming,
+        });
+      }
 
       await sendEvent({
         type: 'status',
@@ -816,6 +1011,14 @@ export function registerChatRoute(app: FastifyInstance) {
       const generationContextChunks =
         retrievalResult?.contextChunks ?? workflowPlan.carryForwardChunks;
       const generationQuery = buildContextualGenerationQuery(message, workflowPlan.relevantHistory);
+      const generationOptions = {
+        alreadyReranked: true,
+        detailSubIntent: workflowPlan.detailSubIntent,
+        answerStyle:
+          workflowPlan.shouldSkipRetrieval && workflowPlan.carryForwardMode === 'reuse_same_law'
+            ? 'follow_up_freeform'
+            : 'qa_contract',
+      } as const;
       let generationTimedOut = false;
       const generationOutcome = await resolveWithTimeout(
         generate(
@@ -824,7 +1027,7 @@ export function registerChatRoute(app: FastifyInstance) {
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          generationOptions,
         ),
         app.env.GENERATION_TIMEOUT_MS,
       );
@@ -842,14 +1045,18 @@ export function registerChatRoute(app: FastifyInstance) {
           },
           'Generation timed out; streaming deterministic grounded fallback',
         );
-        generationResult = await generate(
+        const fallbackGeneration = await generate(
           { ...app.env, OPENAI_API_KEY: '' },
           generationQuery,
           generationContextChunks,
           workflowPlan.relevantHistory,
           filteredRelatedCases,
-          { alreadyReranked: true },
+          generationOptions,
         );
+        generationResult = {
+          ...fallbackGeneration,
+          answer: cleanupAnswerStructure(fallbackGeneration.answer),
+        };
       } else {
         generationResult = generationOutcome.value;
       }
@@ -964,12 +1171,14 @@ export function registerChatRoute(app: FastifyInstance) {
             preferredLawIds: workflowPlan.preferredLawIds,
             contextChunks: retrievalResult?.contextChunks ?? workflowPlan.carryForwardChunks,
             retrievalQuality,
+            retrievalTiming: retrievalResult?.retrievalTiming,
             quality,
             keywordTerms: workflowPlan.keywordProfile.topicalTerms,
             primaryDomain:
               workflowPlan.keywordProfile.primaryDomain !== 'unknown'
                 ? workflowPlan.keywordProfile.primaryDomain
                 : workflowPlan.intent,
+            followUpHint,
           }),
         );
       } catch (persistenceErr) {
@@ -999,10 +1208,13 @@ export function registerChatRoute(app: FastifyInstance) {
           latencyMs,
           workflowMs: workflowLatencyMs,
           retrievalMs: retrievalLatencyMs,
+          retrievalStages: retrievalResult?.retrievalTiming,
           generationMs: generationLatencyMs,
           persistenceMs: persistenceLatencyMs,
           retrievalTimedOut,
           generationTimedOut,
+          cacheHit: Boolean(retrievalCacheKind),
+          cacheKind: retrievalCacheKind,
         },
         quality,
       };
@@ -1124,6 +1336,7 @@ function buildAssistantMessageMetadata(params: AssistantMetadataBuildParams): Re
     suggestedQuestions: params.suggestedQuestions,
     usage: {
       latencyMs: params.latencyMs,
+      retrievalStages: params.retrievalTiming,
     },
     quality: params.quality,
     laws: params.relatedLaws.length,
@@ -1136,6 +1349,13 @@ function buildAssistantMessageMetadata(params: AssistantMetadataBuildParams): Re
       carryForwardMode: params.carryForwardMode,
       primaryDomain: params.primaryDomain ?? params.intent,
       keywords: params.keywordTerms ?? [],
+      followUp: params.followUpHint
+        ? {
+            kind: params.followUpHint.kind,
+            confidence: params.followUpHint.confidence,
+            referencedTurnIndex: params.followUpHint.referencedTurnIndex ?? null,
+          }
+        : null,
     },
     retrievalSnapshot:
       params.contextChunks && params.contextChunks.length > 0
@@ -1181,6 +1401,359 @@ function buildEarlyResponseResponse(
       overall: 1,
       issues: [],
     },
+  };
+}
+
+function buildSessionRetrievalCacheResult(
+  message: string,
+  records: MessageRecord[],
+): RetrievalResult | null {
+  const cachedAssistant = findSessionCachedAssistantRecord(message, records);
+  if (!cachedAssistant) {
+    return null;
+  }
+
+  const metadata = asRecord(cachedAssistant.metadata);
+  const snapshot = asRecord(metadata.retrievalSnapshot);
+  const contextChunks = readArray<ChromaQueryResult>(snapshot.contextChunks);
+  if (contextChunks.length === 0) {
+    return null;
+  }
+
+  const retrievalQuality = asRetrievalQuality(snapshot.retrievalQuality ?? metadata.retrievalQuality);
+  if (retrievalQuality.overall < 0.45) {
+    return null;
+  }
+
+  const sources = readArray<Source>(snapshot.sources).length > 0
+    ? readArray<Source>(snapshot.sources)
+    : readArray<Source>(metadata.sources);
+  const relatedLaws = readArray<RelatedLawDto>(snapshot.relatedLaws).length > 0
+    ? readArray<RelatedLawDto>(snapshot.relatedLaws)
+    : readArray<RelatedLawDto>(metadata.relatedLaws);
+  const relatedCases = readArray<RelatedCaseDto>(snapshot.relatedCases).length > 0
+    ? readArray<RelatedCaseDto>(snapshot.relatedCases)
+    : readArray<RelatedCaseDto>(metadata.relatedCases);
+
+  return {
+    contextChunks,
+    sources,
+    relatedLaws,
+    relatedCases,
+    sourcesUsed: sources.length,
+    retrievalQuality,
+    retrievalTiming: zeroRetrievalTiming(),
+  };
+}
+
+async function maybeGetGlobalRetrievalCache(params: {
+  env: AppEnv;
+  message: string;
+  workflowPlan: WorkflowPlan;
+  requestLog: FastifyRequest['log'];
+}): Promise<RetrievalResult | null> {
+  const ineligibleReason = getGlobalRetrievalCacheIneligibilityReason(
+    params.env,
+    params.message,
+    params.workflowPlan,
+  );
+  if (ineligibleReason) {
+    params.requestLog.info(
+      {
+        reason: ineligibleReason,
+        intent: params.workflowPlan.intent,
+        scope: params.workflowPlan.scope.scope,
+        carryForwardMode: params.workflowPlan.carryForwardMode,
+        shouldSkipRetrieval: params.workflowPlan.shouldSkipRetrieval,
+      },
+      'Global retrieval cache lookup skipped',
+    );
+    return null;
+  }
+
+  try {
+    const normalizedQuestion = normalizeRetrievalCacheQuestion(params.message);
+    const entry = await getRetrievalCacheEntry({
+      normalizedQuestion,
+      intent: params.workflowPlan.intent,
+      cacheVersion: params.env.RETRIEVAL_CACHE_VERSION,
+      retrievalSpeedMode: params.env.RETRIEVAL_SPEED_MODE,
+    });
+
+    if (!entry) {
+      params.requestLog.info(
+        {
+          intent: params.workflowPlan.intent,
+          normalizedQuestion,
+          cacheVersion: params.env.RETRIEVAL_CACHE_VERSION,
+          retrievalSpeedMode: params.env.RETRIEVAL_SPEED_MODE,
+        },
+        'Global retrieval cache miss',
+      );
+      return null;
+    }
+
+    params.requestLog.info(
+      {
+        intent: params.workflowPlan.intent,
+        normalizedQuestion,
+        cacheVersion: params.env.RETRIEVAL_CACHE_VERSION,
+        cacheKeyMode: entry.lookupMode ?? 'primary',
+        retrievalSpeedMode: params.env.RETRIEVAL_SPEED_MODE,
+        storedRetrievalSpeedMode: entry.retrievalSpeedMode,
+        sources: entry.sources.length,
+        laws: entry.relatedLaws.length,
+        cases: entry.relatedCases.length,
+        hitCount: entry.hitCount,
+      },
+      'Global retrieval cache hit',
+    );
+    return buildRetrievalResultFromCacheEntry(entry);
+  } catch (err) {
+    params.requestLog.warn(
+      { err },
+      'Global retrieval cache lookup failed; continuing with normal retrieval',
+    );
+    return null;
+  }
+}
+
+async function maybeStoreGlobalRetrievalCache(params: {
+  env: AppEnv;
+  message: string;
+  workflowPlan: WorkflowPlan;
+  retrievalResult: RetrievalResult;
+  requestLog: FastifyRequest['log'];
+}): Promise<void> {
+  const ineligibleReason = getGlobalRetrievalCacheIneligibilityReason(
+    params.env,
+    params.message,
+    params.workflowPlan,
+  );
+  if (ineligibleReason) {
+    params.requestLog.info(
+      {
+        reason: ineligibleReason,
+        intent: params.workflowPlan.intent,
+        scope: params.workflowPlan.scope.scope,
+        carryForwardMode: params.workflowPlan.carryForwardMode,
+        shouldSkipRetrieval: params.workflowPlan.shouldSkipRetrieval,
+      },
+      'Global retrieval cache store skipped',
+    );
+    return;
+  }
+
+  const qualityEligibility = getGlobalRetrievalCacheQualityEligibility(
+    params.env,
+    params.retrievalResult,
+  );
+  if (!qualityEligibility.eligible) {
+    params.requestLog.info(
+      {
+        reason: qualityEligibility.reason,
+        retrievalQualityOverall: params.retrievalResult.retrievalQuality?.overall ?? null,
+        minQuality: params.env.RETRIEVAL_CACHE_MIN_QUALITY,
+        contextChunks: params.retrievalResult.contextChunks.length,
+        sources: params.retrievalResult.sources.length,
+        laws: params.retrievalResult.relatedLaws.length,
+      },
+      'Global retrieval cache store skipped because retrieval quality is too low',
+    );
+    return;
+  }
+
+  try {
+    await upsertRetrievalCacheEntry(
+      {
+        normalizedQuestion: normalizeRetrievalCacheQuestion(params.message),
+        intent: params.workflowPlan.intent,
+        contextChunks: params.retrievalResult.contextChunks,
+        sources: params.retrievalResult.sources,
+        relatedLaws: params.retrievalResult.relatedLaws,
+        relatedCases: params.retrievalResult.relatedCases,
+        sourcesUsed: params.retrievalResult.sourcesUsed,
+        retrievalQuality: params.retrievalResult.retrievalQuality,
+        retrievalTiming: params.retrievalResult.retrievalTiming,
+        cacheVersion: params.env.RETRIEVAL_CACHE_VERSION,
+        retrievalSpeedMode: params.env.RETRIEVAL_SPEED_MODE,
+      },
+      params.env.RETRIEVAL_CACHE_TTL_SECONDS,
+    );
+    params.requestLog.info(
+      {
+        intent: params.workflowPlan.intent,
+        normalizedQuestion: normalizeRetrievalCacheQuestion(params.message),
+        cacheVersion: params.env.RETRIEVAL_CACHE_VERSION,
+        cacheKeyMode: 'primary',
+        retrievalSpeedMode: params.env.RETRIEVAL_SPEED_MODE,
+        eligibilityReason: qualityEligibility.reason,
+        retrievalQualityOverall: params.retrievalResult.retrievalQuality?.overall ?? null,
+        contextChunks: params.retrievalResult.contextChunks.length,
+        sources: params.retrievalResult.sources.length,
+        laws: params.retrievalResult.relatedLaws.length,
+        cases: params.retrievalResult.relatedCases.length,
+      },
+      'Global retrieval cache stored',
+    );
+  } catch (err) {
+    params.requestLog.warn(
+      { err },
+      'Global retrieval cache write failed; response already generated',
+    );
+  }
+}
+
+function getGlobalRetrievalCacheIneligibilityReason(
+  env: AppEnv,
+  message: string,
+  workflowPlan: WorkflowPlan,
+): string | null {
+  if (!env.RETRIEVAL_CACHE_ENABLED) {
+    return 'cache_disabled';
+  }
+  if (workflowPlan.scope.scope !== 'legal') {
+    return 'non_legal_scope';
+  }
+  if (workflowPlan.intent === 'unknown') {
+    return 'unknown_intent';
+  }
+  if (workflowPlan.shouldSkipRetrieval) {
+    return 'follow_up_or_retrieval_skipped';
+  }
+  if (workflowPlan.carryForwardMode !== 'full_refresh') {
+    return 'not_full_refresh';
+  }
+  if (workflowPlan.earlyResponse) {
+    return 'early_response';
+  }
+  if (!isRetrievalCacheEligibleQuestion(message)) {
+    return 'question_not_cache_eligible_or_pii';
+  }
+  return null;
+}
+
+function buildRetrievalResultFromCacheEntry(entry: RetrievalCacheEntry): RetrievalResult {
+  return {
+    contextChunks: entry.contextChunks,
+    sources: entry.sources,
+    relatedLaws: entry.relatedLaws,
+    relatedCases: entry.relatedCases,
+    sourcesUsed: entry.sourcesUsed,
+    retrievalQuality: entry.retrievalQuality ?? fallbackRetrievalQuality(entry.contextChunks),
+    retrievalTiming: zeroRetrievalTiming(),
+  };
+}
+
+function getGlobalRetrievalCacheQualityEligibility(
+  env: AppEnv,
+  retrievalResult: RetrievalResult,
+): { eligible: boolean; reason: string } {
+  const overall = retrievalResult.retrievalQuality?.overall ?? 0;
+  if (overall >= env.RETRIEVAL_CACHE_MIN_QUALITY) {
+    return { eligible: true, reason: 'quality_score' };
+  }
+
+  const hasGroundedContext =
+    retrievalResult.contextChunks.length >= 2 &&
+    retrievalResult.sources.length >= 1 &&
+    retrievalResult.relatedLaws.length >= 1;
+  if (hasGroundedContext) {
+    return { eligible: true, reason: 'grounded_context' };
+  }
+
+  return { eligible: false, reason: 'low_quality_and_sparse_context' };
+}
+
+function findSessionCachedAssistantRecord(
+  message: string,
+  records: MessageRecord[],
+): MessageRecord | null {
+  const target = normalizeSessionCacheQuestion(message);
+  if (!target) {
+    return null;
+  }
+
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const record = records[i];
+    if (record?.role !== 'user' || normalizeSessionCacheQuestion(record.content) !== target) {
+      continue;
+    }
+
+    for (let j = i + 1; j < records.length; j += 1) {
+      const candidate = records[j];
+      if (!candidate) {
+        continue;
+      }
+      if (candidate.role === 'user') {
+        break;
+      }
+      if (candidate.role === 'assistant' && candidate.content.trim()) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeSessionCacheQuestion(text: string): string {
+  return compactText(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function readScore(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function asRetrievalQuality(value: unknown): RetrievalQuality {
+  const quality = asRecord(value);
+  const qualityBand = quality.qualityBand;
+  return {
+    overall: readScore(quality.overall, 0.6),
+    intentPrecision: readScore(quality.intentPrecision, 0.6),
+    canonicalCoverage: readScore(quality.canonicalCoverage, 0.6),
+    topScore: readScore(quality.topScore, 0.6),
+    qualityBand:
+      qualityBand === 'low' || qualityBand === 'medium' || qualityBand === 'high'
+        ? qualityBand
+        : 'medium',
+  };
+}
+
+function fallbackRetrievalQuality(contextChunks: ChromaQueryResult[]): RetrievalQuality {
+  const topScore = contextChunks[0]?.score ?? 0.6;
+  return {
+    overall: topScore >= 0.8 ? 0.75 : 0.6,
+    intentPrecision: 0.6,
+    canonicalCoverage: contextChunks.length > 0 ? 0.6 : 0,
+    topScore,
+    qualityBand: topScore >= 0.8 ? 'high' : 'medium',
+  };
+}
+
+function zeroRetrievalTiming(): RetrievalStageTiming {
+  return {
+    embeddingMs: 0,
+    vectorSearchMs: 0,
+    keywordSearchMs: 0,
+    fallbackAndFilterMs: 0,
+    caseSearchMs: 0,
+    rerankMs: 0,
+    buildMs: 0,
   };
 }
 
@@ -1657,16 +2230,27 @@ function filterRelatedCasesForResponse(
   options: {
     hasRelatedLaws: boolean;
     intent: QueryIntent;
+    explicitCaseAsk?: boolean;
   },
 ): RelatedCaseDto[] {
   if (!options.hasRelatedLaws && options.intent === 'unknown') {
     return [];
   }
 
-  const minScore = options.hasRelatedLaws ? MIN_CASE_UI_SCORE : MIN_CASE_FALLBACK_SCORE;
+  const minScore = options.explicitCaseAsk
+    ? options.hasRelatedLaws
+      ? MIN_CASE_UI_SCORE
+      : MIN_CASE_FALLBACK_SCORE
+    : MIN_CASE_AUTO_UI_SCORE;
   return relatedCases
     .filter((caseItem) => getRelatedCaseScore(caseItem) >= minScore)
     .slice(0, 6);
+}
+
+function isExplicitCaseQuestion(message: string): boolean {
+  return /(ижил\s+кейс|төстэй\s+кейс|шүүхийн\s+кейс|case|кейс|кейсүүд|шүүхийн\s+шийдвэр|шүүхийн\s+практик|шүүхийн\s+жишиг|жишиг\s+шийдвэр|прецедент|шийтгэх\s+тогтоол|магадлал|хэргийн\s+жишээ)/i.test(
+    compactText(message).toLowerCase(),
+  );
 }
 
 function shouldUseCaseFallback(
