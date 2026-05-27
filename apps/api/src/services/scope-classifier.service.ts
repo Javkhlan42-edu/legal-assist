@@ -275,6 +275,150 @@ const NON_LEGAL_KEYWORDS = [
   'дүрэм',
 ];
 
+const UNICODE_GREETING_PATTERNS = [
+  'сайн байна уу',
+  'сайн уу',
+  'баярлалаа',
+  'туслаач',
+  'туслаарай',
+  'мэнд',
+  'өглөөний мэнд',
+  'өдрийн мэнд',
+  'оройн мэнд',
+  'за',
+];
+
+const UNICODE_LEGAL_KEYWORDS = [
+  'хууль',
+  'зүйл',
+  'заалт',
+  'эрх',
+  'үүрэг',
+  'хариуцлага',
+  'нэхэмжлэл',
+  'шүүх',
+  'шүүгч',
+  'прокурор',
+  'цагдаа',
+  'гэмт хэрэг',
+  'зөрчил',
+  'эрүүгийн',
+  'иргэний',
+  'хөдөлмөр',
+  'гэр бүл',
+  'тэтгэлэг',
+  'асрамж',
+  'гэрээ',
+  'алданги',
+  'нөхөн төлбөр',
+  'гэм хор',
+  'барьцаа',
+  'ипотек',
+  'зээл',
+  'банк',
+  'даатгал',
+  'татвар',
+  'шимтгэл',
+  'өмч',
+  'түрээс',
+  'ажлаас хал',
+  'цалин',
+  'замын хөдөлгөөн',
+  'жолооч',
+  'авто осол',
+  'машин',
+  'мөргөлд',
+  'шүргэ',
+  'осол',
+  'хулгай',
+  'залилан',
+  'луйвар',
+  'цахим луйвар',
+  'цахим залилан',
+  'авлига',
+  'хахууль',
+  'нотлох баримт',
+  'давж заалдах',
+  'өргөдөл',
+  'гомдол',
+  'гэрч',
+  'хохирол',
+  'торгууль',
+  'эрх хасах',
+  'нийтийн хэв журам',
+  'амгалан тайван',
+  'дуу чимээ',
+  'шуугиан',
+  'хөрш',
+  'хэрэглэгч',
+  'бараа',
+  'үйлчилгээ',
+  'буцаалт',
+  'доголдол',
+  'баталгаа',
+  'онлайн дэлгүүр',
+  'өв залгамжлал',
+  'гэрээслэл',
+  'газар',
+  'кадастр',
+  'улсын бүртгэл',
+  'захиргаа',
+  'зөвшөөрөл',
+  'лиценз',
+  'паспорт',
+  'иргэний бүртгэл',
+];
+
+const UNICODE_COLLOQUIAL_LEGAL_KEYWORDS = [
+  'яаж шийдэх',
+  'яах вэ',
+  'ямар арга хэмжээ',
+  'яаж мөнгөө авах',
+  'цагдаад өгөх',
+  'гомдол гаргах',
+  'өрөө төлөхгүй',
+  'банкнаас зээл',
+  'зээлийн төлбөр',
+  'ажлаас халуулсан',
+  'ажлаас үндэслэлгүй',
+  'машин шүргэсэн',
+  'машин мөргөлдсөн',
+  'даатгал мөнгөө өгөхгүй',
+  'түрээсийн барьцаа',
+  'утсаа хулгайд алдсан',
+  'цахим луйварт өртсөн',
+  'онлайнаар залилуулсан',
+  'мөнгө шилжүүлээд залилуулсан',
+  'хүүхэд зодож',
+  'гэр бүлийн хүчирхийлэл',
+  'шүүхэд өгнө',
+  'нэхэмжлэл гаргах',
+  'бараа буцаахгүй',
+  'буцаалт өгөхгүй',
+  'доголдолтой ирсэн',
+  'камер бичлэг байхгүй',
+  'нөхөн төлбөр өгөхгүй',
+];
+
+const UNICODE_NON_LEGAL_KEYWORDS = [
+  'кино',
+  'тоглоом',
+  'хоол',
+  'жор',
+  'диет',
+  'спорт',
+  'аялал',
+  'цаг агаар',
+  'зураг зурах',
+  'дизайн',
+  'код бич',
+  'javascript',
+  'python',
+  'react',
+  'крипто',
+  'bitcoin',
+];
+
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
@@ -328,10 +472,30 @@ function looksLikeGreetingOnly(
 
 export function classifyScope(query: string): ScopeClassificationResult {
   const normalized = normalizeText(query);
-  const matchedGreetings = countKeywordMatches(normalized, GREETING_PATTERNS);
-  const matchedLegalKeywords = countKeywordMatches(normalized, LEGAL_KEYWORDS);
-  const matchedColloquialKeywords = countKeywordMatches(normalized, COLLOQUIAL_LEGAL_KEYWORDS);
-  const matchedNonLegalKeywords = countNonLegalKeywordMatches(normalized, NON_LEGAL_KEYWORDS);
+  const matchedGreetings = Array.from(
+    new Set([
+      ...countKeywordMatches(normalized, GREETING_PATTERNS),
+      ...countKeywordMatches(normalized, UNICODE_GREETING_PATTERNS),
+    ]),
+  );
+  const matchedLegalKeywords = Array.from(
+    new Set([
+      ...countKeywordMatches(normalized, LEGAL_KEYWORDS),
+      ...countKeywordMatches(normalized, UNICODE_LEGAL_KEYWORDS),
+    ]),
+  );
+  const matchedColloquialKeywords = Array.from(
+    new Set([
+      ...countKeywordMatches(normalized, COLLOQUIAL_LEGAL_KEYWORDS),
+      ...countKeywordMatches(normalized, UNICODE_COLLOQUIAL_LEGAL_KEYWORDS),
+    ]),
+  );
+  const matchedNonLegalKeywords = Array.from(
+    new Set([
+      ...countNonLegalKeywordMatches(normalized, NON_LEGAL_KEYWORDS),
+      ...countNonLegalKeywordMatches(normalized, UNICODE_NON_LEGAL_KEYWORDS),
+    ]),
+  );
   const keywordProfile = extractRetrievalKeywordProfile(query);
   const detectedIntent = classifyLegalIntent(query);
   const intentHint = detectedIntent !== 'unknown' ? detectedIntent : keywordProfile.primaryDomain;

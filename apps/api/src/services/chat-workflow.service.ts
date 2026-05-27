@@ -14,6 +14,9 @@ import {
   extractRetrievalKeywordProfile,
   type RetrievalKeywordProfile,
 } from './keyword-extraction.service.js';
+import type { FollowUpHint } from './follow-up-classifier.service.js';
+
+export type { FollowUpHint } from './follow-up-classifier.service.js';
 
 export type WorkflowNodeName =
   | 'route_node'
@@ -26,10 +29,20 @@ export type WorkflowNodeName =
   | 'reasoning_node'
   | 'synthesize_node';
 
-export type CarryForwardMode =
-  | 'reuse_same_law'
-  | 'clarify_skip_retrieval'
-  | 'full_refresh';
+export type CarryForwardMode = 'reuse_same_law' | 'clarify_skip_retrieval' | 'full_refresh';
+
+/**
+ * Detail-level sub-intent when the user is asking for clarification on a prior
+ * answer (e.g. "ёс баримт бүрдүүлэх", "хугацаа хэд вэ?", "хаашаа хандах вэ?"). The
+ * generation service uses this to switch its prompt focus instead of reusing
+ * the original answer template verbatim.
+ */
+export type DetailFollowUpSubIntent =
+  | 'documents'
+  | 'timeline'
+  | 'where_to_go'
+  | 'next_step'
+  | 'general';
 
 interface RetrievalSnapshotChunk {
   id: string;
@@ -96,6 +109,7 @@ export interface WorkflowPlan {
   previousKeywords: string[];
   query: string;
   shouldSkipRetrieval: boolean;
+  detailSubIntent: DetailFollowUpSubIntent;
   earlyResponse?: WorkflowEarlyResponse;
 }
 
@@ -103,6 +117,12 @@ interface PlanWorkflowInput {
   message: string;
   history: ChatMessage[];
   messageRecords?: MessageRecord[];
+  /**
+   * Optional LLM-derived follow-up classification. When supplied it overrides
+   * the regex-based heuristics for carry-forward and history selection. The
+   * route is responsible for asynchronously computing and passing this in.
+   */
+  followUpHint?: FollowUpHint;
 }
 
 const CLARIFY_PATTERNS = [
@@ -179,6 +199,89 @@ function normalizeText(text: string): string {
 
 function includesAnyPattern(normalizedQuery: string, patterns: string[]): boolean {
   return patterns.some((pattern) => normalizedQuery.includes(pattern));
+}
+
+const SUB_INTENT_PATTERNS: Record<Exclude<DetailFollowUpSubIntent, 'general'>, string[]> = {
+  documents: [
+    'ямар баримт',
+    'баримт бүрдүүл',
+    'баримт хэрэгтэй',
+    'нотлох баримт',
+    'нотолгоо',
+    'бичиг',
+    'бичиг баримт',
+    'ямар хуудас',
+    'ямар бичиг',
+    'хавсрал',
+    'хавсаргах',
+    'бүрдүүлэх',
+    'бүрдүүлж',
+    'баримтжуулал',
+  ],
+  timeline: [
+    'хугацаа',
+    'хэд хоног',
+    'хэд хоногийн',
+    'хэдэн жил',
+    'хэдэн сар',
+    'хүртэл',
+    'үргэлжлэх',
+    'эцсийн хугацаа',
+    'хугацаа хэтэр',
+    'хугацаанд',
+    'хэзээ',
+  ],
+  where_to_go: [
+    'хаана ханд',
+    'хаашаа ханд',
+    'хэнд ханд',
+    'аль байгууллага',
+    'ямар байгууллага',
+    'аль шүүх',
+    'ямар шүүх',
+    'эхлээд хаана',
+    'хаана яв',
+    'байгууллага руу',
+    'цагдаад',
+    'Шүүхэд',
+  ],
+  next_step: [
+    'эхлээд яах',
+    'одоо яах',
+    'дараагийн алхам',
+    'ямар алхам',
+    'дараа нь яах',
+    'яаж эхлэх',
+    'яаж үргэлжлүүл',
+  ],
+};
+
+function detectDetailSubIntent(message: string): DetailFollowUpSubIntent {
+  const normalized = normalizeText(message);
+  if (!normalized) {
+    return 'general';
+  }
+
+  // Priority order: documents > timeline > where_to_go > next_step. The
+  // ordering matters because "баримтыг эхлээд хаана өгох" could match both
+  // documents and where_to_go; documents is more actionable.
+  if (includesAnyPattern(normalized, SUB_INTENT_PATTERNS.documents)) {
+    return 'documents';
+  }
+
+  if (includesAnyPattern(normalized, SUB_INTENT_PATTERNS.timeline)) {
+    return 'timeline';
+  }
+
+  if (includesAnyPattern(normalized, SUB_INTENT_PATTERNS.where_to_go)) {
+    return 'where_to_go';
+  }
+
+  if (includesAnyPattern(normalized, SUB_INTENT_PATTERNS.next_step)) {
+    return 'next_step';
+  }
+
+  return 'general';
 }
 
 function mergeRetrievalQuery(
@@ -274,14 +377,17 @@ function toCarryForwardChunks(chunks: RetrievalSnapshotChunk[] = []): ChromaQuer
       document: chunk.document,
       metadata: chunk.metadata ?? {},
       score: Math.max(0.36, Math.min(0.94, Number(chunk.score ?? 0.72) || 0.72 - index * 0.04)),
-      rawScore: Math.max(0.28, Math.min(0.94, Number(chunk.rawScore ?? chunk.score ?? 0.68) || 0.68)),
+      rawScore: Math.max(
+        0.28,
+        Math.min(0.94, Number(chunk.rawScore ?? chunk.score ?? 0.68) || 0.68),
+      ),
     }));
 }
 
 function buildGreetingResponse(): WorkflowEarlyResponse {
   return {
     answer:
-      '## Зөвлөгөө\nСайн байна уу. Би Монгол Улсын хууль зүйн асуултад тусалдаг тул асуудлаа нэг өгүүлбэрээр товч, тодорхой бичээд асуугаарай.\n\n## Яг одоо хийх алхам\n1. Асуудлаа бодит нөхцөлөөр нь бичнэ.\n2. Хэрэв гэрээ, осол, зээл, ажил, гэр бүл, эрүүгийн асуудал бол огноо, байгууллага, баримт байгаа эсэхээ хавсаргана.\n3. Хүсвэл ямар үр дүн мэдэх гэж байгаагаа нэмж бичнэ.\n\n## Практик зөвлөгөө\n- Жишээ: “Банкны зээлийн төлбөр 6 сар хоцорсон бол ямар хариуцлага үүсэх вэ?”\n- Жишээ: “Авто ослын дараа даатгал мөнгө өгөхгүй бол яах вэ?”\n- Жишээ: “Ажлаас үндэслэлгүй халсан бол яаж маргах вэ?”',
+      'Сайн байна уу. Би таны хууль зүйн асуултад туслах зорилготой зөвлөх. Асуудлаа яг яаж үүссэн, хэний хоорондын маргаан, ямар баримт байгаагаа 1–2 өгүүлбэрээр бичээд илгээрэй. Би таны нөхцөлд тохирсон хууль, практик алхмыг хамтад нь тайлбарлаж өгнө.\n\nЖишээ нь: “Банкны зээлийг 6 сар төлөөгүй бол ямар хариуцлага үүсэх вэ?” эсвэл “Машин мөргөлдөөд даатгал нөхөн төлбөр өгөхгүй бол яах вэ?” гэх мэт бичихэд болно.',
     confidence: 0.42,
     suggestedQuestions: [
       'Банкны зээлээ төлж чадаагүй бол ямар хариуцлага үүсэх вэ?',
@@ -295,7 +401,7 @@ function buildGreetingResponse(): WorkflowEarlyResponse {
 function buildOutOfScopeResponse(): WorkflowEarlyResponse {
   return {
     answer:
-      '## Зөвлөгөө\nЭнэ асуулт одоогийн системийн хууль зүйн домэйнээс гадуур байна. Би Монгол Улсын хууль, эрх зүйн асуудлыг тайлбарлахад хамгийн сайн ажиллана.\n\n## Яг одоо хийх алхам\n1. Асуултаа хууль, эрх, үүрэг, торгууль, гэрээ, зээл, осол, ажил, гэр бүл, шүүхтэй холбоотой байдлаар дахин бичнэ.\n2. Хэрэв тодорхой байгууллага, гэрээ, акт, осол, маргаан байвал түүнийгээ дурдана.\n3. Ямар үр дүн мэдэх гэж байгаагаа нэмж бичнэ.\n\n## Практик зөвлөгөө\n- Жишээ: “Түрээсийн барьцаагаа буцааж авч чадахгүй бол яах вэ?”\n- Жишээ: “Утсаа хулгайд алдсан бол ямар арга хэмжээ авах вэ?”\n- Жишээ: “Хүүхдийн тэтгэлэг өгөхгүй бол яаж нэхэмжлэх вэ?”',
+      'Энэ асуулт миний хууль зүйн домэйнээс гадуур байна шүү. Би Монгол Улсын хууль, эрх, үүрэг, гэрээ, зээл, осол, ажил, гэр бүл, шүүхтэй холбоотой асуудалд туслана. Асуултаа хууль зүйн нөхцөлд тохируулж бичвэл би хамгийн тохирох хууль, зүйл, практик алхмыг тайлбарлаж өгнө.\n\nЖишээ нь: “Түрээсийн барьцаагаа буцааж авч чадахгүй бол яах вэ?”, “Утсаа хулгайд алдав яах вэ?”, “Хүүхдийн тэтгэлэг өгөхгүй бол яаж нэхэмжлэх вэ?”.',
     confidence: 0.28,
     suggestedQuestions: [
       'Түрээсийн барьцаагаа буцааж авч чадахгүй бол яах вэ?',
@@ -309,7 +415,7 @@ function buildOutOfScopeResponse(): WorkflowEarlyResponse {
 function buildClarifyResponse(): WorkflowEarlyResponse {
   return {
     answer:
-      '## Зөвлөгөө\nАсуулт арай дутуу байна. Нөхцөлөө нэг мөрөөр тодруулбал би яг тохирох хууль, зүйл, алхмыг нь гаргаж өгнө.\n\n## Яг одоо хийх алхам\n1. Ямар асуудал үүссэнийг товч тодорхой бичнэ.\n2. Хэнтэй холбоотой маргаан болохыг дурдана.\n3. Гэрээ, зээл, осол, ажил, гэр бүл, эрүүгийн аль чиглэлийн асуудал болохыг нэмнэ.\n\n## Практик зөвлөгөө\n- “Банкнаас зээл аваад 6 сар төлөөгүй бол ямар хариуцлага үүсэх вэ?”\n- “Даатгал нөхөн төлбөрөөс татгалзсан бол яаж маргах вэ?”\n- “Ажлаас халсан тушаалаа яаж хүчингүй болгуулах вэ?”',
+      'Асуулт ихээр товч байгаа тул яг тохирох хууль, зүйл, алхмыг нь гаргахад арай хүрэлцэхгүй байна. Яг ямар асуудал үүссэн, хэнтэй холбоотой, хэзээ, ямар баримт байгаагаа 1–3 өгүүлбэрээр нэмээрэй. Гэрээ, зээл, осол, ажил, гэр бүл, эрүүгийн гэх мэт аль чиглэлийн асуудал вэ гэдгийг дурдвал илүү хэрэгтэй.\n\nЖишээ нь: “Банкнаас зээл аваад 6 сар төлөөгүй бол ямар хариуцлага үүсэх вэ?”, “Даатгал нөхөн төлбөрөөс татгалзсан бол яаж маргах вэ?”, “Ажлаас халсан тушаалаа яаж хүчингүй болгуулах вэ?”.',
     confidence: 0.22,
     suggestedQuestions: [
       'Банкны зээлээ төлж чадаагүй бол ямар хариуцлага үүсэх вэ?',
@@ -411,7 +517,11 @@ function detectFineTopic(text: string, extraTerms: string[] = []): FineTopic {
     return 'rental';
   }
 
-  if (/банк|зээл|зээлийн|нэмэгдүүлсэн\s*хүү|алданги|барьцаа.{0,24}зээл|зээл.{0,24}барьцаа/i.test(normalized)) {
+  if (
+    /банк|зээл|зээлийн|нэмэгдүүлсэн\s*хүү|алданги|барьцаа.{0,24}зээл|зээл.{0,24}барьцаа/i.test(
+      normalized,
+    )
+  ) {
     return 'bank_loan';
   }
 
@@ -419,7 +529,9 @@ function detectFineTopic(text: string, extraTerms: string[] = []): FineTopic {
     return 'insurance';
   }
 
-  if (/онлайн\s*дэлгүүр|дэлгүүр|доголдол|буцаалт|хэрэглэгч|бараа|захиалга|баталгаа/i.test(normalized)) {
+  if (
+    /онлайн\s*дэлгүүр|дэлгүүр|доголдол|буцаалт|хэрэглэгч|бараа|захиалга|баталгаа/i.test(normalized)
+  ) {
     return 'consumer';
   }
 
@@ -466,13 +578,35 @@ function selectRelevantHistory(
   message: string,
   history: ChatMessage[],
   keywordProfile: RetrievalKeywordProfile,
+  followUpHint?: FollowUpHint,
 ): ChatMessage[] {
   if (history.length === 0) {
     return [];
   }
 
+  // LLM-classified follow-ups bypass the regex heuristics. "new_topic" wipes
+  // history; "same_topic"/"detail_followup"/"related_topic" force inclusion of
+  // a wider window than the regex path would normally allow.
+  if (followUpHint && followUpHint.confidence >= 0.55) {
+    if (followUpHint.kind === 'new_topic' || followUpHint.kind === 'out_of_scope') {
+      return [];
+    }
+
+    if (
+      followUpHint.kind === 'same_topic' ||
+      followUpHint.kind === 'detail_followup' ||
+      followUpHint.kind === 'related_topic'
+    ) {
+      const window = history.slice(-8).map((item) => ({
+        role: item.role,
+        content: compactText(item.content),
+      }));
+      return window;
+    }
+  }
+
   const currentTokens = keywordProfile.topicalTerms;
-  const recentWindow = history.slice(-6).map((item) => ({
+  const recentWindow = history.slice(-8).map((item) => ({
     role: item.role,
     content: compactText(item.content),
   }));
@@ -515,7 +649,7 @@ function selectRelevantHistory(
     isSupplementalFactFollowUpQuery(normalized, keywordProfile);
 
   if (overlap >= 2 || looksLikeFollowUp || supplementalFactFollowUp) {
-    return recentWindow.slice(-4);
+    return recentWindow.slice(-6);
   }
 
   return [];
@@ -526,6 +660,7 @@ function resolveCarryForwardMode(
   intent: QueryIntent,
   snapshot: RetrievalSnapshot | null,
   keywordProfile: RetrievalKeywordProfile,
+  followUpHint?: FollowUpHint,
 ): {
   mode: CarryForwardMode;
   chunks: ChromaQueryResult[];
@@ -545,6 +680,58 @@ function resolveCarryForwardMode(
       preferredLawIds: [],
       previousKeywords: [],
     };
+  }
+
+  // LLM hint short-circuits the heuristics. "new_topic" wipes carry-forward;
+  // "same_topic"/"detail_followup" reuses the snapshot in full;
+  // "related_topic" reuses half the snapshot to seed a refreshed retrieval.
+  if (followUpHint && followUpHint.confidence >= 0.55) {
+    const carryChunks = toCarryForwardChunks(snapshot.contextChunks ?? []);
+    const carrySources = snapshot.sources ?? [];
+    const carryRelatedLaws = snapshot.relatedLaws ?? [];
+    const carryRelatedCases = snapshot.relatedCases ?? [];
+    const snapshotLawIds = snapshot.lawIds ?? [];
+    const snapshotKeywords =
+      snapshot.keywords && snapshot.keywords.length > 0
+        ? snapshot.keywords
+        : extractRetrievalKeywordProfile((snapshot.lawTitles ?? []).join(' ')).topicalTerms;
+
+    if (followUpHint.kind === 'new_topic' || followUpHint.kind === 'out_of_scope') {
+      return {
+        mode: 'full_refresh',
+        chunks: [],
+        sources: [],
+        relatedLaws: [],
+        relatedCases: [],
+        preferredLawIds: [],
+        previousKeywords: [],
+      };
+    }
+
+    if (followUpHint.kind === 'same_topic' || followUpHint.kind === 'detail_followup') {
+      return {
+        mode: 'reuse_same_law',
+        chunks: carryChunks,
+        sources: carrySources,
+        relatedLaws: carryRelatedLaws,
+        relatedCases: carryRelatedCases,
+        preferredLawIds: snapshotLawIds,
+        previousKeywords: snapshotKeywords,
+      };
+    }
+
+    if (followUpHint.kind === 'related_topic') {
+      const half = Math.max(2, Math.ceil(carryChunks.length / 2));
+      return {
+        mode: 'reuse_same_law',
+        chunks: carryChunks.slice(0, half),
+        sources: carrySources,
+        relatedLaws: carryRelatedLaws,
+        relatedCases: carryRelatedCases,
+        preferredLawIds: snapshotLawIds,
+        previousKeywords: snapshotKeywords,
+      };
+    }
   }
 
   const snapshotIntent = snapshot.intent ?? 'unknown';
@@ -690,8 +877,71 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
   const snapshot = parseSnapshot(lastAssistantRecord);
   const snapshotIntent = resolveSnapshotIntent(snapshot);
   const hasUsableSnapshot = Boolean(snapshot?.contextChunks?.length);
+
+  // The LLM-supplied hint can pre-empt the regex pipeline for greetings, OOS,
+  // or clearly ambiguous follow-ups when the regex misses them. We only honour
+  // it when confidence is high enough to avoid over-eagerly skipping retrieval.
+  const followUpHint = input.followUpHint;
+  const hintIsConfident = Boolean(followUpHint && followUpHint.confidence >= 0.6);
+  const hintSuggestsContinuity =
+    hintIsConfident &&
+    (followUpHint!.kind === 'same_topic' ||
+      followUpHint!.kind === 'detail_followup' ||
+      followUpHint!.kind === 'related_topic');
+
   const canContinueFromSnapshot =
-    hasUsableSnapshot && isContextualFollowUpQuery(normalizedQuery, keywordProfile);
+    hasUsableSnapshot &&
+    (isContextualFollowUpQuery(normalizedQuery, keywordProfile) || hintSuggestsContinuity);
+
+  if (hintIsConfident && followUpHint!.kind === 'greeting' && !canContinueFromSnapshot) {
+    nodes.push('out_of_scope_node');
+    return {
+      nodes,
+      normalizedQuery,
+      rewrittenQuery: normalizedQuery,
+      scope: classifyScope(normalizedQuery),
+      intent: 'unknown',
+      preferredLawIds: [],
+      relevantHistory: [],
+      usesHistoryContext: false,
+      carryForwardMode: 'full_refresh',
+      carryForwardChunks: [],
+      carryForwardSources: [],
+      carryForwardRelatedLaws: [],
+      carryForwardRelatedCases: [],
+      keywordProfile,
+      previousKeywords: [],
+      query: normalizedQuery,
+      shouldSkipRetrieval: true,
+      detailSubIntent: 'general',
+      earlyResponse: buildGreetingResponse(),
+    };
+  }
+
+  if (hintIsConfident && followUpHint!.kind === 'out_of_scope' && !canContinueFromSnapshot) {
+    nodes.push('out_of_scope_node');
+    return {
+      nodes,
+      normalizedQuery,
+      rewrittenQuery: normalizedQuery,
+      scope: classifyScope(normalizedQuery),
+      intent: 'unknown',
+      preferredLawIds: [],
+      relevantHistory: [],
+      usesHistoryContext: false,
+      carryForwardMode: 'full_refresh',
+      carryForwardChunks: [],
+      carryForwardSources: [],
+      carryForwardRelatedLaws: [],
+      carryForwardRelatedCases: [],
+      keywordProfile,
+      previousKeywords: [],
+      query: normalizedQuery,
+      shouldSkipRetrieval: true,
+      detailSubIntent: 'general',
+      earlyResponse: buildOutOfScopeResponse(),
+    };
+  }
 
   if (isShortAmbiguousQuery(normalizedQuery) && !canContinueFromSnapshot) {
     nodes.push('clarify_node');
@@ -713,6 +963,7 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
       previousKeywords: [],
       query: normalizedQuery,
       shouldSkipRetrieval: true,
+      detailSubIntent: 'general',
       earlyResponse: buildClarifyResponse(),
     };
   }
@@ -747,6 +998,7 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
       previousKeywords: [],
       query: normalizedQuery,
       shouldSkipRetrieval: true,
+      detailSubIntent: 'general',
       earlyResponse: buildGreetingResponse(),
     };
   }
@@ -771,6 +1023,7 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
       previousKeywords: [],
       query: normalizedQuery,
       shouldSkipRetrieval: true,
+      detailSubIntent: 'general',
       earlyResponse: buildOutOfScopeResponse(),
     };
   }
@@ -782,9 +1035,20 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
       : keywordProfile.primaryDomain !== 'unknown'
         ? keywordProfile.primaryDomain
         : classifyLegalIntent(rewrittenQuery);
-  const relevantHistory = selectRelevantHistory(normalizedQuery, input.history, keywordProfile);
+  const relevantHistory = selectRelevantHistory(
+    normalizedQuery,
+    input.history,
+    keywordProfile,
+    followUpHint,
+  );
   const usesHistoryContext = relevantHistory.length > 0;
-  const carryForward = resolveCarryForwardMode(normalizedQuery, intent, snapshot, keywordProfile);
+  const carryForward = resolveCarryForwardMode(
+    normalizedQuery,
+    intent,
+    snapshot,
+    keywordProfile,
+    followUpHint,
+  );
   const effectiveIntent =
     carryForward.mode !== 'full_refresh' && snapshot?.intent && snapshot.intent !== 'unknown'
       ? snapshot.intent
@@ -798,7 +1062,34 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
     new Set([...basePreferredLawIds, ...carryForward.preferredLawIds]),
   );
 
-  nodes.push('retrieve_node', 'reasoning_node', 'synthesize_node');
+  // detectDetailSubIntent is only meaningful when the user is following up on
+  // a prior topic; otherwise the regex would mis-classify a fresh question
+  // such as "баримт бүрдүүлэх журам" as a follow-up directive.
+  const isFollowingUp =
+    carryForward.mode !== 'full_refresh' ||
+    (hintIsConfident &&
+      (followUpHint!.kind === 'same_topic' || followUpHint!.kind === 'detail_followup'));
+  const detailSubIntent: DetailFollowUpSubIntent = isFollowingUp
+    ? detectDetailSubIntent(input.message)
+    : 'general';
+  const hasCarryForwardContext = carryForward.chunks.length > 0;
+  const classifierAllowsSnapshotReuse =
+    hintIsConfident &&
+    (followUpHint!.kind === 'same_topic' || followUpHint!.kind === 'detail_followup');
+  const heuristicAllowsSnapshotReuse =
+    detailSubIntent !== 'general' ||
+    isClarifyPattern(input.message) ||
+    isContextualFollowUpQuery(normalizedQuery, keywordProfile);
+  const shouldSkipRetrieval =
+    carryForward.mode === 'reuse_same_law' &&
+    hasCarryForwardContext &&
+    (classifierAllowsSnapshotReuse || heuristicAllowsSnapshotReuse);
+
+  if (!shouldSkipRetrieval) {
+    nodes.push('retrieve_node');
+  }
+  nodes.push('reasoning_node', 'synthesize_node');
+
   return {
     nodes,
     normalizedQuery,
@@ -822,6 +1113,7 @@ export function planChatWorkflow(input: PlanWorkflowInput): WorkflowPlan {
       carryForward.previousKeywords,
       relevantHistory,
     ),
-    shouldSkipRetrieval: false,
+    shouldSkipRetrieval,
+    detailSubIntent,
   };
 }

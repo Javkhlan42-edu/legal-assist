@@ -9,13 +9,13 @@ const loggerInfoMock = vi.fn();
 const loggerWarnMock = vi.fn();
 const loggerErrorMock = vi.fn();
 
-vi.mock('../../src/services/pipeline.service.js', () => ({
+vi.mock('../../../apps/worker/src/services/pipeline.service.js', () => ({
   pipelineService: {
     runSourcePipeline: runSourcePipelineMock,
   },
 }));
 
-vi.mock('../../src/config/env.js', () => ({
+vi.mock('../../../apps/worker/src/config/env.js', () => ({
   getWorkerEnv: () => ({
     CHROMA_URL: 'http://localhost:8000',
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5433/legal_chatbot',
@@ -30,7 +30,7 @@ vi.mock('../../src/config/env.js', () => ({
   }),
 }));
 
-vi.mock('../../src/lib/logger.js', () => ({
+vi.mock('../../../apps/worker/src/lib/logger.js', () => ({
   createLogger: () => ({
     info: loggerInfoMock,
     warn: loggerWarnMock,
@@ -70,7 +70,7 @@ describe('runIngestionJob', () => {
   it('runs pipeline for known source with reliability config', async () => {
     runSourcePipelineMock.mockResolvedValue(buildStats());
 
-    const { runIngestionJob } = await import('../../src/jobs/ingest.js');
+    const { runIngestionJob } = await import('../../../apps/worker/src/jobs/ingest.js');
     await runIngestionJob({ sources: ['legalinfo'], limit: 10 });
 
     expect(runSourcePipelineMock).toHaveBeenCalledTimes(1);
@@ -95,7 +95,7 @@ describe('runIngestionJob', () => {
       }),
     );
 
-    const { runIngestionJob } = await import('../../src/jobs/ingest.js');
+    const { runIngestionJob } = await import('../../../apps/worker/src/jobs/ingest.js');
 
     await expect(runIngestionJob({ sources: ['legalinfo'], limit: 2 })).rejects.toThrow(
       /Fail-fast enabled/,
@@ -103,7 +103,7 @@ describe('runIngestionJob', () => {
   });
 
   it('skips unknown sources', async () => {
-    const { runIngestionJob } = await import('../../src/jobs/ingest.js');
+    const { runIngestionJob } = await import('../../../apps/worker/src/jobs/ingest.js');
     await runIngestionJob({ sources: ['unknown'], limit: 5 });
 
     expect(runSourcePipelineMock).not.toHaveBeenCalled();

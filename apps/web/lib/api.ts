@@ -8,7 +8,10 @@ import type {
   ConversationsResponse,
   GoogleAuthRequest,
   LoginRequest,
+  RelatedCase,
+  RelatedLaw,
   SignupRequest,
+  Source,
 } from '@legal-chatbot/shared';
 import { getStoredAccessToken } from './auth-storage';
 
@@ -26,9 +29,18 @@ export class ApiError extends Error {
   }
 }
 
+export interface ChatStreamRetrievalPreview {
+  sources: Source[];
+  relatedLaws: RelatedLaw[];
+  relatedCases: RelatedCase[];
+  sourcesUsed: number;
+  retrievalMs?: number;
+}
+
 export interface ChatStreamHandlers {
   onConversation?: (conversationId: string) => void;
   onStatus?: (stage: 'retrieval' | 'generation' | 'persisting', message: string) => void;
+  onRetrieval?: (preview: ChatStreamRetrievalPreview) => void;
   onDelta?: (delta: string) => void;
   onComplete?: (response: ChatResponse) => void;
   onError?: (error: { error: string; message: string }) => void;
@@ -133,6 +145,15 @@ export async function streamChatMessage(
         break;
       case 'status':
         handlers.onStatus?.(event.stage, event.message);
+        break;
+      case 'retrieval':
+        handlers.onRetrieval?.({
+          sources: event.sources,
+          relatedLaws: event.relatedLaws,
+          relatedCases: event.relatedCases,
+          sourcesUsed: event.sourcesUsed,
+          retrievalMs: event.retrievalMs,
+        });
         break;
       case 'delta':
         handlers.onDelta?.(event.delta);

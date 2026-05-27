@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { generate, NO_INFO_RESPONSE } from '../../src/services/generation.service.ts';
-import { evaluateAnswerQuality } from '../../src/services/answer-quality.service.ts';
+import { generate, NO_INFO_RESPONSE } from '../../../apps/api/src/services/generation.service.ts';
+import { evaluateAnswerQuality } from '../../../apps/api/src/services/answer-quality.service.ts';
 import {
   classifyLegalIntent,
   rewriteQuery,
   type QueryIntent,
-} from '../../src/services/query-rewrite.service.ts';
-import { classifyScope } from '../../src/services/scope-classifier.service.ts';
+} from '../../../apps/api/src/services/query-rewrite.service.ts';
+import { classifyScope } from '../../../apps/api/src/services/scope-classifier.service.ts';
 
 const INTERNAL_LEAK_RE = /retrieval|rerank|chunk|source score|контекстэд давтагдсан|системийн дотоод/i;
 

@@ -202,6 +202,38 @@ export function useChat() {
                 setConversationId(nextConversationId);
               }
             },
+            onRetrieval: (preview) => {
+              setMessages((current) => {
+                const existing = current.find((message) => message.id === assistantMessageId);
+                if (!existing) {
+                  return [
+                    ...current,
+                    {
+                      id: assistantMessageId,
+                      role: 'assistant',
+                      content: '',
+                      sources: preview.sources,
+                      relatedLaws: preview.relatedLaws,
+                      relatedCases: preview.relatedCases,
+                      sourcesUsed: preview.sourcesUsed,
+                      timestamp: assistantTimestamp,
+                    },
+                  ];
+                }
+
+                return current.map((message) =>
+                  message.id === assistantMessageId
+                    ? {
+                        ...message,
+                        sources: preview.sources,
+                        relatedLaws: preview.relatedLaws,
+                        relatedCases: preview.relatedCases,
+                        sourcesUsed: preview.sourcesUsed,
+                      }
+                    : message,
+                );
+              });
+            },
             onDelta: (delta) => {
               if (!delta) {
                 return;

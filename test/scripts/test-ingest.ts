@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────
 // Quick Ingestion Test Script
 // ────────────────────────────────────────────────────────────
-// Run: pnpm tsx scripts/test-ingest.ts
+// Run: pnpm tsx test/scripts/test-ingest.ts
 //
 // Tests the ingestion pipeline with a minimal dataset.
 // TODO: Implement after crawler adapters are built in Step 3.
