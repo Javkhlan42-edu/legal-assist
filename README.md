@@ -46,12 +46,21 @@ docker compose -f docker/docker-compose.yml up -d
 pnpm dev
 ```
 
-This starts:
+This starts the local development stack:
 
 - **Web** at http://localhost:3000
 - **API** at http://localhost:3001
 - **PostgreSQL** at localhost:5432
 - **ChromaDB** at localhost:8000
+
+## Production Deployment
+
+The system is deployed publicly at:
+
+- **Web app**: https://hop-on.dev
+- **API health check**: https://hop-on.dev/health
+
+The production deployment runs on AWS behind HTTPS and serves the same legal assistant application as the local development stack.
 
 ### Worker (manual ingestion)
 
